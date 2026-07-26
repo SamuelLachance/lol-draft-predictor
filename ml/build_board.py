@@ -8,6 +8,7 @@ from pathlib import Path
 import trueskill as ts
 ROOT=Path(__file__).resolve().parents[1]; PROC=ROOT/"data"/"processed"; OUT=ROOT/"web"/"public"/"data"; OUT.mkdir(parents=True,exist_ok=True)
 ROLES=["top","jng","mid","bot","sup"]
+PICK=[f"blue_{r}" for r in ROLES]+[f"red_{r}" for r in ROLES]
 ENV=ts.TrueSkill(draw_probability=0.0); BETA=ENV.beta
 def wl(a,b):  # trueskill winprob (a beats b), a,b = list of Rating
     mu=sum(r.mu for r in a)-sum(r.mu for r in b); s2=sum(r.sigma**2 for r in a)+sum(r.sigma**2 for r in b)+(len(a)+len(b))*BETA**2
@@ -101,18 +102,35 @@ def main():
     teams.sort(key=lambda t:-t["power"])
     json.dump(teams,open(OUT/"teams.json","w",encoding="utf-8"),ensure_ascii=False)
 
-    # ---- players.json (TrueSkill) ----
-    recent["kda"]=((recent.kills+recent.assists)/recent.deaths.replace(0,1)).clip(upper=20)
-    g=recent.groupby(["playername","position"]).agg(team=("teamname",lambda s:s.mode().iloc[0] if len(s.mode()) else ""),league=("league",lambda s:s.mode().iloc[0] if len(s.mode()) else ""),games=("result","count"),wr=("result","mean"),gd15=("golddiffat15","mean"),kda=("kda","mean")).reset_index()
-    g=g[g.games>=10]
+    # ---- players.json : force d'equipe REGION-CALIBREE + PERFORMANCE INDIVIDUELLE (style TrueSkill 2) ----
+    pw={t:eff(t) for t in R}                              # power region-calibre par equipe
+    rt1=recent[recent.league.isin(TIER1)].copy()         # seulement tier-1 (competition comparable)
+    rt1["team_kills"]=rt1.groupby(["gameid","side"])["kills"].transform("sum").clip(lower=1)
+    rt1["kp"]=(rt1.kills+rt1.assists)/rt1.team_kills      # kill participation (clef supports/jungle)
+    rt1["kda"]=((rt1.kills+rt1.assists)/rt1.deaths.replace(0,1)).clip(upper=20)
+    g=rt1.groupby(["playername","position"]).agg(
+        team=("teamname",lambda s:s.mode().iloc[0] if len(s.mode()) else ""),
+        league=("league",lambda s:s.mode().iloc[0] if len(s.mode()) else ""),
+        games=("result","count"),wr=("result","mean"),gd15=("golddiffat15","mean"),
+        kda=("kda","mean"),dmg=("damageshare","mean"),kp=("kp","mean")).reset_index()
+    g=g[g.games>=15].copy()
+    for col in ["gd15","kda","dmg","kp"]:                 # z-score relatif au ROLE (isole l'individu)
+        g[col+"_z"]=g.groupby("position")[col].transform(lambda s:(s-s.mean())/(s.std() or 1)).fillna(0)
+    W={"top":{"gd15_z":.35,"dmg_z":.25,"kda_z":.2,"kp_z":.2},
+       "jng":{"gd15_z":.2,"dmg_z":.1,"kda_z":.25,"kp_z":.45},
+       "mid":{"gd15_z":.3,"dmg_z":.3,"kda_z":.15,"kp_z":.25},
+       "bot":{"gd15_z":.25,"dmg_z":.35,"kda_z":.2,"kp_z":.2},
+       "sup":{"gd15_z":.0,"dmg_z":.0,"kda_z":.35,"kp_z":.65}}
     players=[]
     for r in g.itertuples():
-        pr=PR.get(r.playername)
-        if pr is None: continue
+        w=W.get(r.position,{}); p=sum(getattr(r,k)*v for k,v in w.items())
+        teampw=pw.get(r.team,reg_elo.get(reg(r.team),1500))
+        rating=round((teampw-1500)/20 + 4.0*p + 40, 1)   # power d'equipe region-calibree + perf individuelle
         players.append({"player":r.playername,"team":r.team,"league":r.league,"role":r.position,
-            "ts":round(pr.mu-3*pr.sigma,1),"mu":round(pr.mu,1),"games":int(r.games),"wr":round(float(r.wr),3),
-            "gd15":int(r.gd15) if r.gd15==r.gd15 else 0,"kda":round(float(r.kda),2) if r.kda==r.kda else 0})
-    players.sort(key=lambda p:-p["ts"])
+            "rating":rating,"team_pw":round(teampw),"perf":round(float(p),2),
+            "games":int(r.games),"wr":round(float(r.wr),3),"gd15":int(r.gd15) if r.gd15==r.gd15 else 0,
+            "kda":round(float(r.kda),2) if r.kda==r.kda else 0,"kp":round(float(r.kp),2) if r.kp==r.kp else 0})
+    players.sort(key=lambda p:-p["rating"])
     json.dump(players,open(OUT/"players.json","w",encoding="utf-8"),ensure_ascii=False)
 
     # ---- champions.json (champion TrueSkill + meta) ----
@@ -125,6 +143,11 @@ def main():
             "games":int(r.games),"wr":round(float(r.wr),3),"gd15":int(r.gd15) if r.gd15==r.gd15 else 0})
     champs.sort(key=lambda c:-c["ts"])
     json.dump(champs,open(OUT/"champions.json","w",encoding="utf-8"),ensure_ascii=False)
+
+    # ---- champ_pool.json : TOUS les champions, rating agnostique du rôle (picker flex) ----
+    seen=sorted(set(pd.unique(dt[PICK].astype(str).values.ravel())))
+    pool=[{"champion":c,"ts":round(CR[c].mu-3*CR[c].sigma,1)} for c in seen if c and c!="nan"]
+    json.dump(pool,open(OUT/"champ_pool.json","w",encoding="utf-8"),ensure_ascii=False)
 
     # ---- regions.json ----
     regions=[{"region":k,"rating":round(v),"mean_team_elo":round(reg_mean_elo.get(k,1500))} for k,v in sorted(reg_elo.items(),key=lambda t:-t[1]) if k!="OTHER"]

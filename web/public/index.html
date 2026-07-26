@@ -84,13 +84,13 @@ Ratings reflect 2025 major leagues. Built for esports analysis, not betting advi
 <script>
 const $=s=>document.querySelector(s), el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e};
 const ROLES=()=>['top','jng','mid','bot','sup'];
-const state={teams:[],players:[],champions:[],matches:[],meta:{},regions:[],view:'picks',tLeague:'ALL',pRole:'mid',cRole:'mid'};
+const state={teams:[],players:[],champions:[],matches:[],meta:{},regions:[],pool:[],view:'picks',tLeague:'ALL',pRole:'mid',cRole:'mid'};
 const pct=x=>Math.round(x*100)+'%';
 async function j(f){const r=await fetch('data/'+f+'.json');return r.json()}
 
 async function boot(){
-  [state.teams,state.players,state.champions,state.matches,state.meta,state.regions]=await Promise.all(
-    ['teams','players','champions','matches','meta','regions'].map(f=>j(f).catch(()=>[])));
+  [state.teams,state.players,state.champions,state.matches,state.meta,state.regions,state.pool]=await Promise.all(
+    ['teams','players','champions','matches','meta','regions','champ_pool'].map(f=>j(f).catch(()=>[])));
   $('#sub').textContent=`${state.meta.n_teams} teams · ${state.meta.n_players} players · updated ${state.meta.updated}`;
   cards(); render();
   $('#tabs').onclick=e=>{const b=e.target.closest('.tab');if(!b)return;
@@ -154,13 +154,13 @@ function teams(){
 function players(){
   const roles=[['top','Top'],['jng','Jungle'],['mid','Mid'],['bot','Bot'],['sup','Support']];
   const bar=filterBar(roles,state.pRole,k=>{state.pRole=k;render()});
-  const p=panel('Player ratings — TrueSkill',bar);
+  const p=panel('Player ratings — TrueSkill 2 (team result + individual performance)',bar);
   const list=state.players.filter(x=>x.role===state.pRole).slice(0,60);
   const rows=list.map((x,i)=>{const tr=el('tr');
     tr.innerHTML=`<td class="rk">${i+1}</td><td><b>${x.player}</b> <span class="muted">${x.team}</span><span class="tag">${x.league}</span></td>
-      <td class="rtg num">${x.ts.toFixed(1)}</td><td class="num muted">${x.mu.toFixed(1)}</td><td class="num">${pct(x.wr)}</td>
-      <td class="num">${x.gd15>0?'+':''}${x.gd15}</td><td class="num">${x.kda}</td>`;return tr});
-  p.append(tableEl([['#','rk'],['Player'],['TrueSkill','num'],['μ','num'],['Win%','num'],['GD@15','num'],['KDA','num']],rows));return p;
+      <td class="rtg num">${x.rating.toFixed(1)}</td><td class="num muted">${x.team_pw}</td><td class="num">${pct(x.wr)}</td>
+      <td class="num">${pct(x.kp)}</td><td class="num">${x.kda}</td>`;return tr});
+  p.append(tableEl([['#','rk'],['Player'],['Rating','num'],['Team','num'],['Win%','num'],['KP','num'],['KDA','num']],rows));return p;
 }
 function champs(){
   const roles=[['top','Top'],['jng','Jungle'],['mid','Mid'],['bot','Bot'],['sup','Support']];
@@ -179,11 +179,9 @@ function predict(){
   const TM=Object.fromEntries(state.teams.map(t=>[t.team,t]));
   const BL=state.meta.blend||{w0:0,elo:1,ts:0};
   const erf=x=>{const t=1/(1+0.3275911*Math.abs(x));const yy=1-(((((1.061405429*t-1.453152027)*t+1.421413741)*t-0.284496736)*t+0.254829592)*t)*Math.exp(-x*x);return x>=0?yy:-yy};
-  // champion ratings by role (TrueSkill)
-  const cByRole={},cRating={};
-  ROLES().forEach(r=>{cByRole[r]=[];cRating[r]={}});
-  state.champions.forEach(c=>{if(cByRole[c.role]){cByRole[c.role].push(c);cRating[c.role][c.champion]=c.ts}});
-  ROLES().forEach(r=>cByRole[r].sort((a,b)=>a.champion.localeCompare(b.champion)));
+  // full champion pool — ANY champ at ANY position (flex picks + future meta shifts)
+  const pool=(state.pool&&state.pool.length?state.pool:state.champions).slice().sort((a,b)=>a.champion.localeCompare(b.champion));
+  const cRate=Object.fromEntries(pool.map(c=>[c.champion,c.ts]));
   const wrap=el('div');wrap.style.padding='16px';
   const selA=el('select'),selB=el('select');
   teams.forEach(t=>{selA.append(new Option(`${t.team} (${t.elo})`,t.team));selB.append(new Option(`${t.team} (${t.elo})`,t.team))});
@@ -197,7 +195,7 @@ function predict(){
   const picks={blue:{},red:{}};
   function champSel(side,role){
     const s=el('select');s.style.minWidth='140px';s.append(new Option('— '+role+' —',''));
-    cByRole[role].forEach(c=>s.append(new Option(`${c.champion} (${c.ts.toFixed(0)})`,c.champion)));
+    pool.forEach(c=>s.append(new Option(`${c.champion} (${c.ts.toFixed(0)})`,c.champion)));
     s.onchange=()=>{picks[side][role]=s.value;go()};return s;
   }
   const grid=el('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:18px';
@@ -208,7 +206,7 @@ function predict(){
   });
   draftBox.append(grid);
   draftToggle.onclick=()=>{const open=draftBox.style.display==='none';draftBox.style.display=open?'block':'none';draftToggle.textContent=open?'－ Hide drafts':'＋ Add drafts (optional)'};
-  function draftAvg(side){const v=ROLES().map(r=>cRating[r][picks[side][r]]).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
+  function draftAvg(side){const v=ROLES().map(r=>cRate[picks[side][r]]).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
   function go(){
     const a=selA.value,b=selB.value,TA=TM[a],TB=TM[b]; const BETA=25/6;
     const pElo=1/(1+Math.pow(10,(TB.power-TA.power)/400)); let eLog=Math.log(pElo/(1-pElo)),tLog=0,tstxt='';
