@@ -1,0 +1,65 @@
+name: Daily board update
+
+on:
+  schedule:
+    - cron: '0 13 * * *'   # every day at 13:00 UTC
+  workflow_dispatch: {}      # allow manual runs
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-board
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install --quiet pandas numpy scikit-learn trueskill pyarrow gdown tqdm
+
+      - name: Cache Oracle's Elixir raw data
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: oe-raw-${{ github.run_id }}
+          restore-keys: |
+            oe-raw-
+
+      - name: Fetch data (refresh current season, keep history from cache)
+        run: |
+          # force re-download of the two most recent seasons; older years come from cache
+          rm -f data/raw/oe_2025.csv data/raw/oe_2024.csv
+          python ml/fetch_data.py
+
+      - name: Rebuild ratings and board data
+        run: |
+          python ml/build_drafts.py
+          python ml/build_drafts_team.py
+          python ml/build_board.py
+
+      - name: Show summary
+        run: cat web/public/data/meta.json
+
+      - name: Deploy to gh-pages
+        run: |
+          cd web/public
+          touch .nojekyll
+          rm -rf .git
+          git init -q
+          git checkout -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Daily board update $(date -u +%F)"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
