@@ -3,7 +3,7 @@ name: Daily board update
 on:
   schedule:
     - cron: '0 13 * * *'   # every day at 13:00 UTC
-  workflow_dispatch: {}      # allow manual runs
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -15,7 +15,9 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: pip install --quiet pandas numpy scikit-learn trueskill pyarrow gdown tqdm
 
-      - name: Cache Oracle's Elixir raw data
+      - name: Cache Oracle's Elixir raw CSVs (for best-effort refresh)
         uses: actions/cache@v4
         with:
           path: data/raw
@@ -34,13 +36,24 @@ jobs:
           restore-keys: |
             oe-raw-
 
-      - name: Fetch data (refresh current season, keep history from cache)
-        run: |
-          # force re-download of the two most recent seasons; older years come from cache
-          rm -f data/raw/oe_2025.csv data/raw/oe_2024.csv
-          python ml/fetch_data.py
+      - name: Download data snapshot from Release (reliable source)
+        run: gh release download board-data --pattern board_input.parquet -D data --clobber
 
-      - name: Rebuild ratings and board data
+      - name: Best-effort refresh from Oracle's Elixir (Google Drive is quota-limited in CI)
+        continue-on-error: true
+        run: |
+          rm -f data/raw/oe_2025.csv data/raw/oe_2024.csv
+          python ml/fetch_data.py \
+            && python ml/make_board_input.py \
+            && gh release upload board-data data/board_input.parquet --clobber \
+            && echo "Snapshot refreshed from Oracle's Elixir."
+
+      - name: Prepare input (use fresh data if refreshed, else the snapshot)
+        run: |
+          mkdir -p data/processed
+          [ -f data/processed/oe_all.parquet ] || cp data/board_input.parquet data/processed/oe_all.parquet
+
+      - name: Build ratings and board data
         run: |
           python ml/build_drafts.py
           python ml/build_drafts_team.py
@@ -61,5 +74,3 @@ jobs:
           git add -A
           git commit -q -m "Daily board update $(date -u +%F)"
           git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
