@@ -1,0 +1,31 @@
+# Data (large CSVs / parquet)
+data/raw/
+data/processed/
+*.csv
+*.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node
+web/node_modules/
+web/.next/
+web/out/
+
+# Heavy local model artifacts (site uses web/public/model/draft_model.json)
+models/*.joblib
+models/draft_model.json
+web/out/
+web/.next/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
