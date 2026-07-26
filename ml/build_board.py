@@ -20,7 +20,8 @@ for lg in ["LPL","LDL","LPLOL","LPL CL"]: REGION[lg]="CN"
 for lg in ["LEC","EM","LFL","LFL2","PRM","PRMP","NLC","NLC Aurora Open","UL","LVP SL","TCL","ESLOL","EBL","GLL","HLL","HM","NEXO","UKLC","LIT","AL","PGN","PRMP"]: REGION[lg]="EMEA"
 for lg in ["LTA","LTA N","LTA S","LCS","NA LCS","NACL","CBLOL","CBLOLA","LAS","LLA","LRN","LRS","CD"]: REGION[lg]="AMERICAS"
 for lg in ["LCP","PCS","VCS","LJL","LJLA","PCL","LCO","DDH","USP","UPL","OPL","VL"]: REGION[lg]="APAC"
-TIER1={"LCK","LPL","LEC","LTA","LTA N","LTA S","LCS","LCP","LJL","VCS","PCS","CBLOL","TCL"}
+# ligues TIER-1 internationales (Worlds/MSI) — PAS les tier-2 domestiques (LFL, EM, LVP SL...)
+TIER1={"LCK","LPL","LEC","LTA","LTA N","LTA S","LCS","NA LCS","LCP","LJL","VCS","PCS","CBLOL","TCL","LLA"}
 
 def main():
     oe=pd.read_parquet(PROC/"oe_all.parquet",columns=["gameid","side","position","playername","teamname","champion","result","league","date","kills","deaths","assists","golddiffat15","damageshare"])
@@ -63,7 +64,8 @@ def main():
         for r,x in zip(ROLES,ncc):CR[getattr(row,f"red_{r}")]=x
     # region-calibration de l'Elo d'equipe : effective = region_elo + (team - moyenne region)
     team_reg=defaultdict(list)
-    for t,e in R.items(): team_reg[reg(t)].append(e)
+    for t,e in R.items():
+        if home.get(t,"") in TIER1: team_reg[reg(t)].append(e)  # baseline région = équipes tier-1
     reg_mean_elo={k:np.mean(v) for k,v in team_reg.items()}
     reg_elo={k:RG.get(k,1500) for k in reg_mean_elo}
     def eff(t): return reg_elo.get(reg(t),1500)+(R[t]-reg_mean_elo.get(reg(t),1500)) if t in R else 1500
@@ -89,7 +91,7 @@ def main():
     # ---- teams.json ----
     tr_rows=oe[(oe.position.astype(str).str.lower()=="team")&(oe.year>=2025)][["teamname","result","league"]].dropna(subset=["teamname","result"])
     rec=tr_rows.groupby("teamname").agg(wins=("result","sum"),games=("result","count"),league=("league",lambda s:s.mode().iloc[0] if len(s.mode()) else "")).reset_index()
-    rec=rec[(rec.games>=5)&(rec.league.isin(TIER1|set(REGION)))]
+    rec=rec[(rec.games>=8)&(rec.league.isin(TIER1))]
     teams=[]
     for r in rec.itertuples():
         tts=team_ts(r.teamname)
