@@ -1,6 +1,8 @@
 # DraftSight — LoL Pro Draft Predictor
 
-Site live + modèle ML qui estime la probabilité de victoire **Blue vs Red** à partir d’une draft pro 5v5.
+Site live: https://samuellachance.github.io/lol-draft-predictor/
+
+Modèle ML qui estime la probabilité de victoire **Blue vs Red** à partir d’une draft pro 5v5.
 
 ## Données
 
