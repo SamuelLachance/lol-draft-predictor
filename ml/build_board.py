@@ -104,13 +104,13 @@ def main():
 
     # ---- players.json : force d'equipe REGION-CALIBREE + PERFORMANCE INDIVIDUELLE (style TrueSkill 2) ----
     pw={t:eff(t) for t in R}                              # power region-calibre par equipe
-    rt1=recent[recent.league.isin(TIER1)].copy()         # seulement tier-1 (competition comparable)
+    rt1=recent[recent.league.isin(TIER1)].copy().sort_values("_date")   # tier-1, trie par date
     rt1["team_kills"]=rt1.groupby(["gameid","side"])["kills"].transform("sum").clip(lower=1)
     rt1["kp"]=(rt1.kills+rt1.assists)/rt1.team_kills      # kill participation (clef supports/jungle)
     rt1["kda"]=((rt1.kills+rt1.assists)/rt1.deaths.replace(0,1)).clip(upper=20)
     g=rt1.groupby(["playername","position"]).agg(
-        team=("teamname",lambda s:s.mode().iloc[0] if len(s.mode()) else ""),
-        league=("league",lambda s:s.mode().iloc[0] if len(s.mode()) else ""),
+        team=("teamname","last"),      # equipe ACTUELLE (game la plus recente), pas le mode
+        league=("league","last"),
         games=("result","count"),wr=("result","mean"),gd15=("golddiffat15","mean"),
         kda=("kda","mean"),dmg=("damageshare","mean"),kp=("kp","mean")).reset_index()
     g=g[g.games>=15].copy()
