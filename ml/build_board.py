@@ -82,12 +82,17 @@ def main():
     def team_ts(t):
         if t not in roster: return None
         rs=[PR[roster[t][ro]] for ro in ROLES]; return (sum(r.mu for r in rs),math.sqrt(sum(r.sigma**2 for r in rs)))
-    # blend logistique causal : elo_logit + ts_logit -> outcome
+    # blend logistique : elo_logit + ts_logit -> outcome
+    # deux blends : (1) holdout causal (train sur le passe) pour une accuracy HONNETE + les
+    # predictions matches.json hors-echantillon ; (2) plein (toute la donnee) = celui DEPLOYE
+    # pour predire les matchs FUTURS (onglet Predict), qui doit exploiter la donnee la plus recente.
     from sklearn.linear_model import LogisticRegression
-    cut=int(n*0.85); X=np.c_[elo_logit,ts_logit]; blend=LogisticRegression(C=1e6).fit(X[:cut],y[:cut])
-    w0=float(blend.intercept_[0]); we,wt=[float(x) for x in blend.coef_[0]]
-    # accuracy recente du blend (causal)
-    pt=blend.predict_proba(X[cut:])[:,1]; acc=float(((pt>=.5).astype(int)==y[cut:]).mean())
+    cut=int(n*0.85); X=np.c_[elo_logit,ts_logit]
+    hold=LogisticRegression(C=1e6).fit(X[:cut],y[:cut])
+    hw0=float(hold.intercept_[0]); hwe,hwt=[float(x) for x in hold.coef_[0]]
+    pt=hold.predict_proba(X[cut:])[:,1]; acc=float(((pt>=.5).astype(int)==y[cut:]).mean())  # accuracy holdout (forward)
+    full=LogisticRegression(C=1e6).fit(X,y)
+    w0=float(full.intercept_[0]); we,wt=[float(x) for x in full.coef_[0]]                    # blend deploye (meta.blend)
 
     # ---- teams.json ----
     tr_rows=oe[(oe.position.astype(str).str.lower()=="team")&(oe.year>=2025)][["teamname","result","league"]].dropna(subset=["teamname","result"])
@@ -156,15 +161,17 @@ def main():
     # ---- matches.json (blend causal) ----
     matches=[]
     for i in range(max(0,n-300),n):
-        row=dt.iloc[i]; p=1/(1+math.exp(-(w0+we*elo_logit[i]+wt*ts_logit[i])))
+        row=dt.iloc[i]; p=1/(1+math.exp(-(hw0+hwe*elo_logit[i]+hwt*ts_logit[i])))  # blend holdout = hors-echantillon (honnete)
         matches.append({"date":str(pd.to_datetime(row._date).date()),"blue":str(row.blue_team),"red":str(row.red_team),"pred":round(float(p),3),"blue_win":int(y[i])})
     json.dump(matches[::-1],open(OUT/"matches.json","w",encoding="utf-8"),ensure_ascii=False)
 
-    json.dump({"updated":str(pd.Timestamp.now().date()),"n_teams":len(teams),"n_players":len(players),"n_champions":len(champs),
+    data_through=str(pd.to_datetime(dt._date).max().date())   # date du DERNIER match reel (verite sur la fraicheur)
+    json.dump({"updated":str(pd.Timestamp.now().date()),"data_through":data_through,
+        "n_teams":len(teams),"n_players":len(players),"n_champions":len(champs),"n_games":int(n),
         "model":"Team Elo (region-cal) + player TrueSkill + draft","recent_acc":round(acc,3),
         "blend":{"w0":w0,"elo":we,"ts":wt},"note":"Player TrueSkill + region-calibrated Elo. Draft edge from upset analysis."},
         open(OUT/"meta.json","w",encoding="utf-8"),ensure_ascii=False)
-    print(f"teams {len(teams)} | players {len(players)} | champs {len(champs)} | regions {len(regions)} | blend recent_acc {acc:.3f}")
+    print(f"teams {len(teams)} | players {len(players)} | champs {len(champs)} | regions {len(regions)} | blend recent_acc {acc:.3f} | data_through {data_through}")
     print("regions:",[(r['region'],r['rating']) for r in regions])
     print("top teams:",[(t['team'],t['power'],t['region']) for t in teams[:6]])
 

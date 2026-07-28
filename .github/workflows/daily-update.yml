@@ -36,22 +36,17 @@ jobs:
           restore-keys: |
             oe-raw-
 
-      - name: Download data snapshot from Release (reliable source)
+      - name: Download data snapshot from Release (reliable base)
         run: gh release download board-data --pattern board_input.parquet -D data --clobber
 
-      - name: Best-effort refresh from Oracle's Elixir (Google Drive is quota-limited in CI)
+      - name: Best-effort incremental refresh (merge recent games; Drive is quota-limited in CI)
         continue-on-error: true
-        run: |
-          rm -f data/raw/oe_2025.csv data/raw/oe_2024.csv
-          python ml/fetch_data.py \
-            && python ml/make_board_input.py \
-            && gh release upload board-data data/board_input.parquet --clobber \
-            && echo "Snapshot refreshed from Oracle's Elixir."
+        run: python ml/refresh_snapshot.py --upload
 
-      - name: Prepare input (use fresh data if refreshed, else the snapshot)
+      - name: Prepare input for the build (always from the snapshot)
         run: |
           mkdir -p data/processed
-          [ -f data/processed/oe_all.parquet ] || cp data/board_input.parquet data/processed/oe_all.parquet
+          cp -f data/board_input.parquet data/processed/oe_all.parquet
 
       - name: Build ratings and board data
         run: |

@@ -91,7 +91,7 @@ async function j(f){const r=await fetch('data/'+f+'.json');return r.json()}
 async function boot(){
   [state.teams,state.players,state.champions,state.matches,state.meta,state.regions,state.pool]=await Promise.all(
     ['teams','players','champions','matches','meta','regions','champ_pool'].map(f=>j(f).catch(()=>[])));
-  $('#sub').textContent=`${state.meta.n_teams} teams · ${state.meta.n_players} players · updated ${state.meta.updated}`;
+  $('#sub').textContent=`${state.meta.n_teams} teams · ${state.meta.n_players} players · data through ${state.meta.data_through||state.meta.updated} · rebuilt ${state.meta.updated}`;
   cards(); render();
   $('#tabs').onclick=e=>{const b=e.target.closest('.tab');if(!b)return;
     [...$('#tabs').children].forEach(t=>t.classList.toggle('on',t===b));state.view=b.dataset.v;render()};
@@ -100,8 +100,9 @@ async function boot(){
 function cards(){
   const m=state.meta;
   $('#cards').innerHTML='';
-  const data=[['Recent accuracy',pct(m.recent_acc)+' <small>last 300</small>'],
-    ['Model',m.model],['Teams rated',m.n_teams],['Players rated',m.n_players],['Champions',m.n_champions]];
+  const data=[['Data through',(m.data_through||m.updated)+(m.n_games?` <small>${m.n_games.toLocaleString()} games</small>`:'')],
+    ['Recent accuracy',pct(m.recent_acc)+' <small>last 300</small>'],
+    ['Model',m.model],['Teams rated',m.n_teams],['Players rated',m.n_players]];
   data.forEach(([k,v])=>{const c=el('div','card');c.append(el('div','k',k),el('div','v',v));$('#cards').append(c)});
 }
 const panel=(title,extra)=>{const p=el('div','panel');const h=el('div','phead');h.append(el('h3',null,title));if(extra)h.append(extra);p.append(h);return p};
