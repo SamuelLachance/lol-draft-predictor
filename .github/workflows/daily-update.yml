@@ -26,22 +26,14 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install --quiet pandas numpy scikit-learn trueskill pyarrow gdown tqdm
-
-      - name: Cache Oracle's Elixir raw CSVs (for best-effort refresh)
-        uses: actions/cache@v4
-        with:
-          path: data/raw
-          key: oe-raw-${{ github.run_id }}
-          restore-keys: |
-            oe-raw-
+        run: pip install --quiet pandas numpy scikit-learn trueskill pyarrow gdown tqdm huggingface_hub
 
       - name: Download data snapshot from Release (reliable base)
         run: gh release download board-data --pattern board_input.parquet -D data --clobber
 
-      - name: Best-effort incremental refresh (merge recent games; Drive is quota-limited in CI)
+      - name: Refresh from HuggingFace OE mirror (reliable in CI; merges recent games, updates Release)
         continue-on-error: true
-        run: python ml/refresh_snapshot.py --upload
+        run: python ml/fetch_hf.py --upload
 
       - name: Prepare input for the build (always from the snapshot)
         run: |

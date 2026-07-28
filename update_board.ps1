@@ -6,8 +6,10 @@
 $ErrorActionPreference = "Continue"
 Set-Location "C:\Users\Admin\Documents\lolcoach\draftwork"
 
-Write-Host "[1/4] Refreshing snapshot from Oracle's Elixir + updating the Release..."
-python ml/refresh_snapshot.py --upload      # best-effort: skips a year if Drive quota blocks it
+Write-Host "[1/4] Refreshing snapshot from the HuggingFace OE mirror + updating the Release..."
+python ml/fetch_hf.py --upload               # reliable source (no Drive quota)
+# Optional: also try the official Drive for the very latest games (works from a residential IP when quota allows)
+python ml/refresh_snapshot.py --upload 2>$null
 
 Write-Host "[2/4] Preparing build input..."
 New-Item -ItemType Directory -Force data/processed | Out-Null

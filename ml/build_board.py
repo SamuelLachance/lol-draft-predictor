@@ -24,8 +24,15 @@ for lg in ["LCP","PCS","VCS","LJL","LJLA","PCL","LCO","DDH","USP","UPL","OPL","V
 # ligues TIER-1 internationales (Worlds/MSI) — PAS les tier-2 domestiques (LFL, EM, LVP SL...)
 TIER1={"LCK","LPL","LEC","LTA","LTA N","LTA S","LCS","NA LCS","LCP","LJL","VCS","PCS","CBLOL","TCL","LLA"}
 
+def destring(df):
+    # convertit les colonnes dtype "string" (pd.NA) en object/None : les tests de verite
+    # (all(...), if c) plantent sur pd.NA ("boolean value of NA is ambiguous").
+    for c in df.columns:
+        if str(df[c].dtype)=="string": df[c]=df[c].astype(object).where(df[c].notna(),None)
+    return df
+
 def main():
-    oe=pd.read_parquet(PROC/"oe_all.parquet",columns=["gameid","side","position","playername","teamname","champion","result","league","date","kills","deaths","assists","golddiffat15","damageshare"])
+    oe=destring(pd.read_parquet(PROC/"oe_all.parquet",columns=["gameid","side","position","playername","teamname","champion","result","league","date","kills","deaths","assists","golddiffat15","damageshare"]))
     oe["_date"]=pd.to_datetime(oe.date,errors="coerce"); oe["year"]=oe._date.dt.year
     pl=oe[oe.position.astype(str).str.lower().isin(ROLES)].copy(); pl["position"]=pl.position.str.lower(); pl["side"]=pl.side.astype(str).str.lower()
     # joueurs par game
@@ -35,7 +42,7 @@ def main():
         if len(b)>=5 and len(r)>=5:
             pg[gid]={"bp":[b.loc[ro,"playername"] if ro in b.index else None for ro in ROLES],
                      "rp":[r.loc[ro,"playername"] if ro in r.index else None for ro in ROLES]}
-    dt=pd.read_parquet(PROC/"drafts_team.parquet").dropna(subset=["blue_team","red_team","blue_win"]).copy()
+    dt=destring(pd.read_parquet(PROC/"drafts_team.parquet")).dropna(subset=["blue_team","red_team","blue_win"]).copy()
     dt["blue_win"]=dt.blue_win.astype(int); dt["_date"]=pd.to_datetime(dt.date,errors="coerce"); dt=dt[dt._date.notna()].sort_values("_date").reset_index(drop=True)
     y=dt.blue_win.to_numpy(); n=len(dt); gid=dt.gameid.to_numpy()
     # home league & region par equipe
