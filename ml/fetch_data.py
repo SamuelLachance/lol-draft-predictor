@@ -12,6 +12,7 @@ from tqdm import tqdm
 # Google Drive file IDs published with Oracle's Elixir yearly dumps
 # (same IDs used by the community OE pipeline).
 CSV_FILE_IDS: dict[str, str] = {
+    "2026": "1hnpbrUpBMS1TZI7IovfpKeZfWJH1Aptm",
     "2025": "1v6LRphp2kYciU4SXp0PCjEMuev1bDejc",
     "2024": "1IjIEhLc9n8eLKeY-yh_YigKVWbhgGBsN",
     "2023": "1XXk2LO0CsNADBB1LRGOV5rUpyZdEZ8s2",

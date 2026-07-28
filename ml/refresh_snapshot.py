@@ -93,6 +93,12 @@ def main() -> int:
 
     fresh = pd.concat(fresh_frames, ignore_index=True)
     fresh = fresh.dropna(subset=["gameid"])
+    if not SNAP.exists():                       # pas de base locale -> recupere le snapshot de la Release (ne jamais perdre l'historique)
+        try:
+            subprocess.run(["gh", "release", "download", "board-data", "--pattern", "board_input.parquet",
+                            "-D", str(SNAP.parent), "--clobber"], check=True)
+        except Exception as e:
+            print(f"(pas de snapshot local et download Release echoue: {e} -- merge sur donnees fraiches seules)")
     if SNAP.exists():
         base = pd.read_parquet(SNAP)
         base = base[~base.gameid.isin(set(fresh.gameid))]     # la version fraiche fait autorite sur ces games

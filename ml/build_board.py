@@ -70,14 +70,18 @@ def main():
     reg_mean_elo={k:np.mean(v) for k,v in team_reg.items()}
     reg_elo={k:RG.get(k,1500) for k in reg_mean_elo}
     def eff(t): return reg_elo.get(reg(t),1500)+(R[t]-reg_mean_elo.get(reg(t),1500)) if t in R else 1500
-    # roster TS actuel par equipe (5 derniers joueurs par role)
+    # roster actuel par equipe = titulaire MODAL des 20 derniers games TIER-1 par role
+    # (les events mineurs de fin de saison utilisent des remplacants -> ne pas prendre le dernier game brut)
     recent=pl[pl.year>=2025]
+    rt1r=recent[recent.league.isin(TIER1)].sort_values("_date")
     roster={}
-    for (team),g in recent.groupby("teamname"):
+    for team,g in rt1r.groupby("teamname"):
         rr={}
         for ro in ROLES:
-            sub=g[g.position==ro].sort_values("_date")
-            if len(sub): rr[ro]=sub.playername.iloc[-1]
+            sub=g[g.position==ro]
+            if len(sub):
+                mo=sub.tail(20).playername.mode()
+                rr[ro]=str(mo.iloc[0]) if len(mo) else str(sub.playername.iloc[-1])
         if len(rr)==5: roster[team]=rr
     def team_ts(t):
         if t not in roster: return None
@@ -94,6 +98,18 @@ def main():
     full=LogisticRegression(C=1e6).fit(X,y)
     w0=float(full.intercept_[0]); we,wt=[float(x) for x in full.coef_[0]]                    # blend deploye (meta.blend)
 
+    # ---- prob par match (blend holdout, hors-echantillon) + matchs recents par equipe ----
+    probs=1/(1+np.exp(-(hw0+hwe*elo_logit+hwt*ts_logit)))     # P(blue win) causal-honnete
+    darr=dt._date.dt.strftime("%Y-%m-%d").to_numpy()
+    bt=dt.blue_team.astype(str).to_numpy(); rtm=dt.red_team.astype(str).to_numpy()
+    gteams={gid[i]:(bt[i],rtm[i]) for i in range(n)}          # gameid -> (blue_team, red_team)
+    team_matches=defaultdict(list)
+    for i in range(n):
+        p=float(probs[i]); w=int(y[i])
+        team_matches[bt[i]].append({"date":darr[i],"opp":str(rtm[i]),"side":"blue","pred":round(p,3),"win":w})
+        team_matches[rtm[i]].append({"date":darr[i],"opp":str(bt[i]),"side":"red","pred":round(1-p,3),"win":1-w})
+    team_matches={t:v[-12:][::-1] for t,v in team_matches.items()}   # 12 plus recents, plus recent d'abord
+
     # ---- teams.json ----
     tr_rows=oe[(oe.position.astype(str).str.lower()=="team")&(oe.year>=2025)][["teamname","result","league"]].dropna(subset=["teamname","result"])
     rec=tr_rows.groupby("teamname").agg(wins=("result","sum"),games=("result","count"),league=("league",lambda s:s.mode().iloc[0] if len(s.mode()) else "")).reset_index()
@@ -101,40 +117,69 @@ def main():
     teams=[]
     for r in rec.itertuples():
         tts=team_ts(r.teamname)
+        rost=[{"role":ro,"player":roster[r.teamname][ro]} for ro in ROLES] if r.teamname in roster else []
         teams.append({"team":r.teamname,"league":r.league,"region":reg(r.teamname),"power":round(eff(r.teamname)),
             "elo":round(R.get(r.teamname,1500)),"ts_mu":round(tts[0],1) if tts else None,"ts_sig":round(tts[1],1) if tts else None,
-            "wins":int(r.wins),"losses":int(r.games-r.wins),"games":int(r.games),"wr":round(r.wins/r.games,3)})
+            "wins":int(r.wins),"losses":int(r.games-r.wins),"games":int(r.games),"wr":round(r.wins/r.games,3),
+            "reg_base":round(reg_elo.get(reg(r.teamname),1500)),"reg_mean":round(reg_mean_elo.get(reg(r.teamname),1500)),
+            "roster":rost,"matches":team_matches.get(r.teamname,[])})
     teams.sort(key=lambda t:-t["power"])
     json.dump(teams,open(OUT/"teams.json","w",encoding="utf-8"),ensure_ascii=False)
 
-    # ---- players.json : force d'equipe REGION-CALIBREE + PERFORMANCE INDIVIDUELLE (style TrueSkill 2) ----
+    # ---- players.json : PERF INDIVIDUELLE (signal primaire) + contexte d'equipe region-calibre ----
     pw={t:eff(t) for t in R}                              # power region-calibre par equipe
     rt1=recent[recent.league.isin(TIER1)].copy().sort_values("_date")   # tier-1, trie par date
     rt1["team_kills"]=rt1.groupby(["gameid","side"])["kills"].transform("sum").clip(lower=1)
-    rt1["kp"]=(rt1.kills+rt1.assists)/rt1.team_kills      # kill participation (clef supports/jungle)
+    rt1["kp"]=(rt1.kills+rt1.assists)/rt1.team_kills      # kill participation
     rt1["kda"]=((rt1.kills+rt1.assists)/rt1.deaths.replace(0,1)).clip(upper=20)
+    rt1["gdate"]=rt1._date.dt.strftime("%Y-%m-%d")
+    # equipe COURANTE = modale des 25 derniers games (ignore prets/one-off) + detail par joueur
+    cur_team={}; pdet={}
+    for (pn,pos),s in rt1.groupby(["playername","position"],sort=False):
+        s=s.sort_values("_date"); last=s.tail(25); mo=last.teamname.mode()
+        cur_team[(pn,pos)]=str(mo.iloc[0]) if len(mo) else str(last.teamname.iloc[-1])
+        cg=s.groupby("champion").agg(gp=("result","count"),cwr=("result","mean"),ckda=("kda","mean")).reset_index().sort_values("gp",ascending=False)
+        champs=[{"champion":str(c.champion),"games":int(c.gp),"wr":round(float(c.cwr),3),"kda":round(float(c.ckda),2)} for c in cg.head(8).itertuples()]
+        recg=[]
+        for gg in s.tail(8).iloc[::-1].itertuples(index=False):
+            br=gteams.get(gg.gameid,("","")); opp=br[1] if str(gg.side)=="blue" else br[0]
+            recg.append({"date":str(gg.gdate),"champion":str(gg.champion),"win":int(gg.result),
+                "k":int(gg.kills),"d":int(gg.deaths),"a":int(gg.assists),
+                "gd15":int(gg.golddiffat15) if gg.golddiffat15==gg.golddiffat15 else 0,"opp":str(opp)})
+        wins=int(s.result.sum()); pdet[(pn,pos)]={"champs":champs,"recent":recg,"wins":wins,"losses":int(len(s)-wins)}
     g=rt1.groupby(["playername","position"]).agg(
-        team=("teamname","last"),      # equipe ACTUELLE (game la plus recente), pas le mode
-        league=("league","last"),
         games=("result","count"),wr=("result","mean"),gd15=("golddiffat15","mean"),
         kda=("kda","mean"),dmg=("damageshare","mean"),kp=("kp","mean")).reset_index()
-    g=g[g.games>=15].copy()
-    for col in ["gd15","kda","dmg","kp"]:                 # z-score relatif au ROLE (isole l'individu)
+    g["team"]=[cur_team.get((pn,po),"") for pn,po in zip(g.playername,g.position)]
+    g["league"]=g.team.map(lambda t:home.get(t,""))
+    g=g[g.games>=20].copy()                              # seuil releve (15->20) : filtre les tres petits echantillons
+    for col in ["gd15","kda","dmg","kp","wr"]:           # z-score par ROLE ; wr penalise les bilans perdants
         g[col+"_z"]=g.groupby("position")[col].transform(lambda s:(s-s.mean())/(s.std() or 1)).fillna(0)
-    W={"top":{"gd15_z":.35,"dmg_z":.25,"kda_z":.2,"kp_z":.2},
-       "jng":{"gd15_z":.2,"dmg_z":.1,"kda_z":.25,"kp_z":.45},
-       "mid":{"gd15_z":.3,"dmg_z":.3,"kda_z":.15,"kp_z":.25},
-       "bot":{"gd15_z":.25,"dmg_z":.35,"kda_z":.2,"kp_z":.2},
-       "sup":{"gd15_z":.0,"dmg_z":.0,"kda_z":.35,"kp_z":.65}}
+    W={"top":{"gd15_z":.28,"dmg_z":.18,"kda_z":.14,"kp_z":.15,"wr_z":.25},
+       "jng":{"gd15_z":.16,"dmg_z":.08,"kda_z":.16,"kp_z":.30,"wr_z":.30},
+       "mid":{"gd15_z":.24,"dmg_z":.22,"kda_z":.12,"kp_z":.17,"wr_z":.25},
+       "bot":{"gd15_z":.20,"dmg_z":.28,"kda_z":.15,"kp_z":.12,"wr_z":.25},
+       "sup":{"gd15_z":.0,"dmg_z":.0,"kda_z":.28,"kp_z":.42,"wr_z":.30}}
+    KSH=25                                               # shrinkage : a 25 games -> 50% du z brut, a 100 -> 80%
     players=[]
     for r in g.itertuples():
-        w=W.get(r.position,{}); p=sum(getattr(r,k)*v for k,v in w.items())
+        w=W.get(r.position,{}); perf_raw=sum(getattr(r,k)*v for k,v in w.items())
+        shrink=r.games/(r.games+KSH)                     # attenuation selon l'echantillon du joueur
+        perf=perf_raw*shrink
         teampw=pw.get(r.team,reg_elo.get(reg(r.team),1500))
-        rating=round((teampw-1500)/20 + 4.0*p + 40, 1)   # power d'equipe region-calibree + perf individuelle
-        players.append({"player":r.playername,"team":r.team,"league":r.league,"role":r.position,
-            "rating":rating,"team_pw":round(teampw),"perf":round(float(p),2),
-            "games":int(r.games),"wr":round(float(r.wr),3),"gd15":int(r.gd15) if r.gd15==r.gd15 else 0,
-            "kda":round(float(r.kda),2) if r.kda==r.kda else 0,"kp":round(float(r.kp),2) if r.kp==r.kp else 0})
+        rbase=reg_elo.get(reg(r.team),1500)              # niveau de la region
+        teampw_eff=rbase+(teampw-rbase)*shrink           # l'edge d'equipe n'est attribue qu'a hauteur de l'echantillon
+        c_team=(teampw_eff-1500)/40.0                    # contexte d'equipe (influence reduite + sample-shrink)
+        c_ind=7.0*perf                                   # perf individuelle = signal PRIMAIRE
+        rating=round(c_team+c_ind+50, 1)
+        d=pdet.get((r.playername,r.position),{})
+        players.append({"player":r.playername,"team":r.team,"league":r.league,"region":reg(r.team),"role":r.position,
+            "rating":rating,"team_pw":round(teampw),"perf":round(float(perf),2),
+            "c_team":round(float(c_team),1),"c_ind":round(float(c_ind),1),
+            "games":int(r.games),"wins":d.get("wins",0),"losses":d.get("losses",0),"wr":round(float(r.wr),3),
+            "gd15":int(r.gd15) if r.gd15==r.gd15 else 0,"dmg":round(float(r.dmg),3) if r.dmg==r.dmg else 0,
+            "kda":round(float(r.kda),2) if r.kda==r.kda else 0,"kp":round(float(r.kp),2) if r.kp==r.kp else 0,
+            "champs":d.get("champs",[]),"recent":d.get("recent",[])})
     players.sort(key=lambda p:-p["rating"])
     json.dump(players,open(OUT/"players.json","w",encoding="utf-8"),ensure_ascii=False)
 
