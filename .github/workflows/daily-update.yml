@@ -31,7 +31,14 @@ jobs:
       - name: Download data snapshot from Release (reliable base)
         run: gh release download board-data --pattern board_input.parquet -D data --clobber
 
-      - name: Refresh from HuggingFace OE mirror (reliable in CI; merges recent games, updates Release)
+      # Source PRINCIPALE : Leaguepedia via Special:CargoExport — contient les games du jour
+      # meme et n'est pas quota-bloque (contrairement au Drive d'Oracle's Elixir).
+      - name: Refresh from Leaguepedia (games du jour)
+        continue-on-error: true
+        run: python ml/fetch_leaguepedia.py --fresh --upload
+
+      # Filet de securite : miroir HuggingFace d'Oracle's Elixir (colonnes eco completes)
+      - name: Backfill from HuggingFace OE mirror (best-effort)
         continue-on-error: true
         run: python ml/fetch_hf.py --upload
 
