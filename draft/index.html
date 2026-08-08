@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="fr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Draft Assistant — BO3/BO5 Fearless (méthode Shanei × Kazewa)</title>
+<style>
+:root{--bg:#0b0e14;--panel:#141a24;--sunk:#0e131b;--line:#232c3a;--line2:#2e3a4d;
+--ink:#e6edf3;--muted:#8b98a9;--faint:#5c6a7a;--accent:#0ac8b9;--gold:#c8aa6e;
+--blue:#3b82f6;--red:#e5534b;--fav:#3fb950;--bad:#e5534b;--warn:#e3b341;
+--bluebg:rgba(59,130,246,.13);--redbg:rgba(229,83,75,.13);--favbg:rgba(63,185,80,.12)}
+:root[data-t=light]{--bg:#f5f7fa;--panel:#fff;--sunk:#eef1f5;--line:#e2e7ee;--line2:#d3dae4;
+--ink:#0d1520;--muted:#5a6675;--faint:#8b98a9}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,Segoe UI,Roboto,Inter,sans-serif}
+.wrap{max-width:1240px;margin:0 auto;padding:0 16px 60px}
+header{display:flex;align-items:center;gap:12px;padding:16px 0 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--gold));display:grid;place-items:center;font-weight:800;color:#06121a}
+h1{font-size:17px;margin:0}
+.sub{color:var(--muted);font-size:12px}
+.spacer{flex:1}
+button{font-family:inherit}
+.btn{background:var(--sunk);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;font-weight:600}
+.btn:hover{border-color:var(--accent)}
+.btn.on{background:var(--accent);color:#06121a;border-color:var(--accent)}
+.btn.danger:hover{border-color:var(--bad);color:var(--bad)}
+.setup{display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.grp{display:flex;align-items:center;gap:6px}
+.grp .k{color:var(--faint);font-size:10px;text-transform:uppercase;letter-spacing:.6px;margin-right:2px}
+.cols{display:grid;grid-template-columns:1fr 340px;gap:14px;margin-top:14px;align-items:start}
+@media(max-width:940px){.cols{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:13px;overflow:hidden;margin-bottom:14px}
+.phead{display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.phead h3{margin:0;font-size:13px}
+.pbody{padding:12px 14px}
+.seq{display:flex;gap:5px;flex-wrap:wrap;padding:10px 14px}
+.slot{width:70px;border-radius:8px;border:1px solid var(--line2);background:var(--sunk);padding:5px 4px;cursor:pointer;font-size:10px;text-align:center;position:relative}
+.slot .lb{color:var(--faint);font-size:9px;letter-spacing:.4px}
+.slot .nm{font-weight:700;font-size:10px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot.blue{border-left:3px solid var(--blue)}
+.slot.red{border-left:3px solid var(--red)}
+.slot.ban{opacity:.72}
+.slot.ban .nm{text-decoration:line-through;color:var(--bad)}
+.slot.cur{outline:2px solid var(--accent);background:var(--panel)}
+.slot.us{box-shadow:inset 0 0 0 1px var(--gold)}
+.slot.empty .nm{color:var(--faint);font-weight:400}
+.teams{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tcol{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.tcol h4{margin:0;padding:8px 11px;font-size:12px;border-bottom:1px solid var(--line)}
+.tcol.blue h4{background:var(--bluebg);color:var(--blue)}
+.tcol.red h4{background:var(--redbg);color:var(--red)}
+.prow{display:flex;align-items:center;gap:8px;padding:6px 11px;border-bottom:1px solid var(--line);font-size:12px}
+.prow:last-child{border-bottom:none}
+.rtag{font-size:9px;color:var(--muted);border:1px solid var(--line2);border-radius:4px;padding:1px 5px;min-width:34px;text-align:center}
+.rec{display:flex;align-items:center;gap:9px;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.rec:last-child{border-bottom:none}
+.rec:hover{background:var(--sunk)}
+.rec .rk{color:var(--faint);width:16px;font-size:11px}
+.rec .nm{font-weight:700;font-size:13px;flex:1}
+.rec .sc{font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;font-size:13px}
+.rec .why{color:var(--muted);font-size:10.5px;line-height:1.35;padding:0 12px 8px 37px;margin-top:-4px;border-bottom:1px solid var(--line)}
+.tag{font-size:9px;color:var(--muted);border:1px solid var(--line2);border-radius:4px;padding:1px 5px}
+.tag.g{color:var(--fav);border-color:var(--fav)}
+.tag.w{color:var(--warn);border-color:var(--warn)}
+.tag.b{color:var(--bad);border-color:var(--bad)}
+input[type=text]{background:var(--sunk);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 10px;font-size:13px;width:100%}
+select{background:var(--sunk);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:5px 8px;font-size:12px}
+.list{max-height:280px;overflow-y:auto}
+.warn{display:flex;gap:7px;align-items:flex-start;padding:7px 12px;font-size:11.5px;border-bottom:1px solid var(--line)}
+.warn:last-child{border-bottom:none}
+.warn .ic{flex:none;font-size:12px}
+.bar{height:6px;border-radius:4px;background:var(--sunk);overflow:hidden;flex:1;min-width:50px}
+.bar>span{display:block;height:100%;background:var(--accent)}
+.mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:7px}
+.mini .t{background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:6px 9px}
+.mini .t .k{color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.5px}
+.mini .t .v{font-size:15px;font-weight:700;margin-top:1px}
+.pool{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.pc{font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid var(--line2);background:var(--sunk)}
+.pc.used{opacity:.35;text-decoration:line-through}
+.muted{color:var(--muted)}
+.hint{color:var(--faint);font-size:11px;padding:8px 14px}
+footer{color:var(--faint);font-size:11px;text-align:center;margin-top:22px}
+</style></head>
+<body><div class="wrap">
+<header>
+  <div class="logo">DR</div>
+  <div><h1>Draft Assistant — Fearless</h1><div class="sub" id="sub">BO5 · méthode Shanei × Kazewa</div></div>
+  <div class="spacer"></div>
+  <a class="btn" href="../" style="text-decoration:none">← Ratings board</a>
+  <button class="btn" id="tog">◐</button>
+</header>
+
+<div class="setup" id="setup"></div>
+
+<div class="cols">
+  <div>
+    <div class="panel"><div class="phead"><h3>Déroulé de la draft</h3>
+      <span class="muted" style="font-size:11px" id="phaseLbl"></span>
+      <div class="spacer"></div>
+      <button class="btn" id="undo">↶ Annuler</button>
+      <button class="btn danger" id="reset">Reset game</button></div>
+      <div class="seq" id="seq"></div>
+      <div class="hint" id="hint"></div>
+    </div>
+    <div class="panel"><div class="phead"><h3>Compositions</h3></div>
+      <div class="pbody"><div class="teams" id="teams"></div></div>
+    </div>
+    <div class="panel"><div class="phead"><h3>Analyse — grille Kazewa (5 critères)</h3></div>
+      <div class="pbody"><div class="mini" id="grade"></div></div>
+      <div id="warns"></div>
+    </div>
+    <div class="panel"><div class="phead"><h3>Fearless — santé du pool</h3>
+      <div class="spacer"></div><button class="btn" id="nextGame">✓ Game jouée → suivante</button></div>
+      <div class="pbody" id="poolHealth"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel"><div class="phead"><h3 id="recTitle">Recommandations</h3></div>
+      <div class="list" id="recs"></div>
+    </div>
+    <div class="panel"><div class="phead"><h3>Assigner un champion</h3></div>
+      <div class="pbody"><input type="text" id="search" placeholder="Chercher (pool adverse = infini)…" autocomplete="off"></div>
+      <div class="list" id="searchRes"></div>
+    </div>
+    <div class="panel"><div class="phead"><h3>Ce qu'ILS vont nous ban</h3></div>
+      <div class="list" id="theirBans"></div>
+    </div>
+  </div>
+</div>
+
+<footer>Draft compétitive : 2 phases de bans (6 puis 4) · premier pick bleu, contre-pick rouge en dernier · fearless = les champions joués ne reviennent plus.<br>
+Identité POKE (Shanei) · évaluation force d'équipe × qualité de draft (Kazewa). Outil d'aide à la décision, pas un oracle.</footer>
+</div>
+
+<script>
+const $=s=>document.querySelector(s), el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e};
+const ROLES=['top','jng','mid','bot','sup'];
+const RL={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Supp'};
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+
+// ---- ordre RÉEL d'une draft compétitive (10 bans / 10 picks) ----
+// Bans 1 : B R B R B R | Picks 1 : B / R R / B B / R
+// Bans 2 : R B R B     | Picks 2 : R / B B / R   (dernier pick rouge = contre-pick)
+const ORDER=[
+ {t:'ban',s:'blue',p:'Bans 1'},{t:'ban',s:'red',p:'Bans 1'},{t:'ban',s:'blue',p:'Bans 1'},
+ {t:'ban',s:'red',p:'Bans 1'},{t:'ban',s:'blue',p:'Bans 1'},{t:'ban',s:'red',p:'Bans 1'},
+ {t:'pick',s:'blue',p:'Picks 1'},{t:'pick',s:'red',p:'Picks 1'},{t:'pick',s:'red',p:'Picks 1'},
+ {t:'pick',s:'blue',p:'Picks 1'},{t:'pick',s:'blue',p:'Picks 1'},{t:'pick',s:'red',p:'Picks 1'},
+ {t:'ban',s:'red',p:'Bans 2'},{t:'ban',s:'blue',p:'Bans 2'},{t:'ban',s:'red',p:'Bans 2'},{t:'ban',s:'blue',p:'Bans 2'},
+ {t:'pick',s:'red',p:'Picks 2'},{t:'pick',s:'blue',p:'Picks 2'},{t:'pick',s:'blue',p:'Picks 2'},{t:'pick',s:'red',p:'Picks 2'}
+];
+
+// ATTENTION échelles de la base : certains attributs sont BINAIRES (0/1),
+// d'autres vont de 0 à 3. On normalise tout en 0..1 avant de pondérer,
+// sinon un "engage" (max 1) pèserait 3× moins qu'un "poke" (max 3).
+const MAXV={cc:3,mobility:3,waveclear:3,poke:3,scaling:3,tankiness:3,sustain:3,
+            engage:1,disengage:1,burst:1,global:1,anti_dive:1,pick:1};
+const nrm=(c,k)=>(c[k]||0)/(MAXV[k]||1);
+
+// profils de rôle — identité POKE (Shanei) et plan B ALL-IN.
+// Les poids = points obtenus si l'attribut est au MAXIMUM.
+const PROFILE={
+  poke:{
+    bot:{poke:9,scaling:5,disengage:3,waveclear:2,engage:-2},
+    mid:{poke:9,waveclear:5,scaling:4,disengage:3,engage:-2},
+    sup:{disengage:7,poke:5,cc:3,anti_dive:3,engage:-6},
+    jng:{disengage:7,tankiness:5,anti_dive:5,cc:3,engage:-3},
+    top:{tankiness:5,anti_dive:4,disengage:4,poke:3,waveclear:2,engage:-2}
+  },
+  allin:{
+    bot:{burst:5,scaling:4,mobility:3,engage:2},
+    mid:{burst:6,cc:5,engage:3,mobility:3},
+    sup:{engage:8,cc:6,pick:4,disengage:-3},
+    jng:{engage:8,cc:5,mobility:4,tankiness:3},
+    top:{engage:5,tankiness:4,cc:3,mobility:2}
+  }
+};
+const POKE_FAM=new Set(['poke','control_mage','enchanter','disengage','tank']);
+const ALLIN_FAM=new Set(['engage','assassin','catch','bruiser','skirmisher']);
+
+const S={fmt:'bo5',fearless:'global',side:'blue',plan:'poke',game:1,
+  slots:ORDER.map(()=>null),roles:ORDER.map(()=>null),history:[]};
+let DB={champions:[],pool:{}},BY={};
+
+function save(){try{localStorage.setItem('draftS',JSON.stringify(S))}catch(e){}}
+function load(){try{const r=JSON.parse(localStorage.getItem('draftS')||'null');
+  if(r&&Array.isArray(r.slots)&&r.slots.length===20)Object.assign(S,r)}catch(e){}}
+
+async function boot(){
+  DB=await (await fetch('data/champions.json')).json();
+  DB.champions.forEach(c=>BY[c.name]=c);
+  load(); renderSetup(); render();
+  $('#tog').onclick=()=>{const r=document.documentElement;r.dataset.t=r.dataset.t==='light'?'':'light'};
+  $('#undo').onclick=()=>{for(let i=19;i>=0;i--)if(S.slots[i]){S.slots[i]=null;S.roles[i]=null;break}save();render()};
+  $('#reset').onclick=()=>{if(confirm('Vider la draft en cours ?')){S.slots=ORDER.map(()=>null);S.roles=ORDER.map(()=>null);save();render()}};
+  $('#nextGame').onclick=nextGame;
+  $('#search').oninput=renderSearch;
+}
+// ---------- setup ----------
+function renderSetup(){
+  const w=$('#setup');w.innerHTML='';
+  const mk=(label,opts,cur,on)=>{const g=el('div','grp');g.append(el('span','k',label));
+    opts.forEach(([k,l])=>{const b=el('button','btn'+(k===cur?' on':''),l);b.onclick=()=>{on(k);save();renderSetup();render()};g.append(b)});return g};
+  w.append(mk('Format',[['bo3','BO3'],['bo5','BO5']],S.fmt,k=>S.fmt=k));
+  w.append(mk('Fearless',[['global','Global'],['team','Par équipe'],['off','Off']],S.fearless,k=>S.fearless=k));
+  w.append(mk('Notre side',[['blue','Bleu'],['red','Rouge']],S.side,k=>S.side=k));
+  w.append(mk('Plan',[['poke','Poke'],['allin','All-in']],S.plan,k=>S.plan=k));
+  const g=el('div','grp');g.append(el('span','k','Game'),el('b',null,String(S.game)),
+    el('span','muted',` / ${S.fmt==='bo5'?5:3}`));w.append(g);
+  $('#sub').textContent=`${S.fmt.toUpperCase()} · fearless ${S.fearless} · on est ${S.side==='blue'?'BLEU (1er pick)':'ROUGE (contre-pick)'} · plan ${S.plan}`;
+}
+// ---------- helpers d'état ----------
+const curIdx=()=>S.slots.findIndex(x=>x===null);
+const isOurs=i=>ORDER[i].s===S.side;
+function picksOf(side){const o=[];ORDER.forEach((s,i)=>{if(s.t==='pick'&&s.s===side&&S.slots[i])o.push({name:S.slots[i],role:S.roles[i],i})});return o}
+function bansOf(side){const o=[];ORDER.forEach((s,i)=>{if(s.t==='ban'&&s.s===side&&S.slots[i])o.push(S.slots[i])});return o}
+// champions indisponibles : bans + picks de la game + fearless (games précédentes)
+function unavailable(){
+  const u=new Set();S.slots.forEach(x=>{if(x)u.add(x)});
+  if(S.fearless!=='off')S.history.forEach(g=>{
+    if(S.fearless==='global'){(g.blue||[]).forEach(c=>u.add(c));(g.red||[]).forEach(c=>u.add(c))}
+    else{(g[S.side]||[]).forEach(c=>u.add(c))}});
+  return u;
+}
+// rôles encore libres pour un side
+function freeRoles(side){
+  const used=new Set(picksOf(side).map(p=>p.role).filter(Boolean));
+  return ROLES.filter(r=>!used.has(r));
+}
+// notre pool encore dispo pour un rôle
+function poolFree(role){const u=unavailable();return (DB.pool[role]||[]).filter(c=>!u.has(c))}
+
+// ---------- moteur de score ----------
+function profileScore(c,role){
+  const P=PROFILE[S.plan][role]||{};let s=0;
+  for(const k in P)s+=nrm(c,k)*P[k];
+  return s;
+}
+function compOf(side){return picksOf(side).map(p=>BY[p.name]).filter(Boolean)}
+function pickSlotsLeft(side){let n=0;ORDER.forEach((o,i)=>{if(o.t==='pick'&&o.s===side&&!S.slots[i])n++});return n}
+// identités de compo (Shanei) — sert à mesurer la COHÉRENCE
+function identity(list){
+  let allin=0,poke=0,hyper=0;
+  list.forEach(c=>{
+    // le CC ne compte pour l'all-in que s'il sert à ENGAGER (sinon c'est du peel)
+    allin+=2*c.engage+(['engage','catch'].includes(c.family)?1.5:0)+(c.family==='assassin'?1:0)
+          +(['pick','frontline'].includes(c.teamfight)?.5:0)+.5*c.cc*c.engage+.5*c.pick;
+    poke +=1.5*c.poke+1*c.disengage+(['poke','disengage'].includes(c.family)?1.5:0)
+          +(c.family==='enchanter'?.7:0)+(c.range==='ranged'?.5:0)+.5*c.anti_dive-1*c.engage;
+    // scaling/waveclear sont présents chez TOUT LE MONDE : poids faibles sinon ils dominent
+    hyper+=(c.family==='hypercarry'?3:0)+(c.family==='enchanter'?2:0)+.4*c.scaling+.3*c.waveclear+.5*c.global;
+  });
+  const a=[['allin',allin],['poke',poke],['hyper',hyper]].sort((x,y)=>y[1]-x[1]);
+  const coh=a[0][1]>0?(a[0][1]-a[1][1])/a[0][1]:0;
+  return {name:a[0][0],scores:{allin,poke,hyper},coherence:coh};
+}
+
+function scorePick(c,role,slotI){
+  const why=[];let s=profileScore(c,role);
+  why.push(`profil ${RL[role]} ${S.plan} ${s>=0?'+':''}${s.toFixed(1)}`);
+  const ours=compOf(S.side),them=compOf(S.side==='blue'?'red':'blue');
+  const left=pickSlotsLeft(S.side);   // inclut le slot courant
+  // ORDRE DE PICK (Shanei) : ADC tôt → jungle → mid → support blind → TOP EN DERNIER
+  if(role==='top'&&left>1){s-=6;why.push('⛔ le top se pick TOUJOURS en last (Shanei) −6')}
+  if(role==='top'&&left===1){s+=3;why.push('top en last pick = contre-pick ✔ +3')}
+  if(role==='sup'&&left>=2){s+=1.5;why.push('support blind avant le top +1.5')}
+  if(role==='bot'&&ours.length<=1){s+=2;why.push('ADC tôt (c\'est le supp qui décide le matchup bot) +2')}
+  // 2 IMMOBILES = la sanction chiffrée de Kazewa (−15 sur la draft)
+  const imm=ours.filter(x=>x.mobility===0).length;
+  if(c.mobility===0){if(imm>=1){s-=5;why.push('2e champion immobile → Kazewa −15 sur la draft')}else{s-=1;why.push('immobile −1')}}
+  // cohérence de famille
+  const fam=S.plan==='poke'?POKE_FAM:ALLIN_FAM;
+  if(fam.has(c.family)){s+=2;why.push(`famille ${c.family} cohérente +2`)}
+  else if((S.plan==='poke'?ALLIN_FAM:POKE_FAM).has(c.family)){s-=1.5;why.push(`famille ${c.family} hors plan −1.5`)}
+  // INTERDIT canonique Shanei : carry poke + support engage
+  const hasPokeCarry=ours.some(x=>x.family==='poke'||x.poke>=3);
+  if(S.plan==='poke'&&role==='sup'&&c.family==='engage'&&hasPokeCarry){s-=9;why.push('⛔ supp engage avec un carry poke = interdit Shanei −9')}
+  if(S.plan==='poke'&&c.family==='engage'&&role!=='sup'&&hasPokeCarry&&c.disengage===0){s-=2;why.push('engage pur dans une compo poke −2')}
+  // équilibre AD/AP
+  const ad=ours.filter(x=>x.damage==='ad').length,ap=ours.filter(x=>x.damage==='ap').length;
+  if(c.damage==='ad'&&ad>=3){s-=3;why.push('déjà 3 AD −3')}
+  if(c.damage==='ap'&&ap>=3){s-=3;why.push('déjà 3 AP −3')}
+  if(c.damage==='ad'&&ad===0&&ours.length>=2){s+=2;why.push('apporte de l\'AD +2')}
+  if(c.damage==='ap'&&ap===0&&ours.length>=2){s+=2;why.push('apporte de l\'AP +2')}
+  // frontline obligatoire
+  const front=ours.filter(x=>x.tankiness>=2).length,remain=5-ours.length;
+  if(front===0&&remain<=2&&c.tankiness>=2){s+=4;why.push('il nous FAUT une frontline +4')}
+  // waveclear (siège / défense de poke)
+  if(S.plan==='poke'&&ours.reduce((a,x)=>a+x.waveclear,0)<4&&c.waveclear>=3){s+=1.5;why.push('waveclear pour le siège +1.5')}
+  // Réponse à la compo adverse — MAIS « fais TA compo, et SI POSSIBLE counter la leur » :
+  // le bonus de counter est plafonné par notre propre cohérence (Shanei, notes/17).
+  const idOurs=identity(ours.concat([c]));
+  const cf=Math.min(1,idOurs.coherence/0.35);
+  const eEngage=them.reduce((a,x)=>a+x.engage,0),eDive=them.filter(x=>x.family==='assassin'||x.mobility>=3).length;
+  if(eEngage>=3){const b=(2.5*c.disengage+2.5*c.anti_dive)*cf;if(b>0){s+=b;why.push(`${eEngage} engageurs en face → désengage/anti-dive +${b.toFixed(1)}`)}}
+  if(eDive>=2){const b=(2.0*c.anti_dive+1.5*(c.tankiness>=2?1:0))*cf;if(b>0){s+=b;why.push(`dive adverse ×${eDive} → protection +${b.toFixed(1)}`)}}
+  const ePoke=them.reduce((a,x)=>a+x.poke,0);
+  if(ePoke>=6&&c.waveclear>=2){s+=1.5*cf;why.push('miroir poke → waveclear')}
+  // ≥2 immobiles en face → contrôle de terrain (Kazewa : « le pick ne joue pas »)
+  const eImm=them.filter(x=>x.mobility===0).length;
+  if(eImm>=2&&c.cc>=2&&['aoe','frontline','pick'].includes(c.teamfight)){s+=2.5*cf;why.push(`${eImm} immobiles en face → contrôle de terrain +${(2.5*cf).toFixed(1)}`)}
+  // position dans la draft : blind vs contre-pick
+  const revealed=them.length;
+  if(revealed<=1){ // blind : on cache la compo et on évite d'être contré
+    if(c.roles.length>=3){s+=1.8;why.push('flex '+c.roles.length+' rôles (décale toute leur draft) +1.8')}
+    if(c.family==='skirmisher'||c.family==='split'){s-=1.2;why.push('dépend du matchup en blind −1.2')}
+  }else if(left===1){ // notre dernier pick = le vrai contre-pick
+    if(c.anti_dive||c.disengage){s+=1.2;why.push('contre-pick : annule leur plan +1.2')}
+  }
+  return {score:s,why};
+}
+
+function scoreBan(c){
+  const why=[];const them=compOf(S.side==='blue'?'red':'blue');
+  // Ce qui tue une compo POKE : ce qui FERME LA DISTANCE (engage + CC + mobilité),
+  // puis ce qui saute la backline (dive/burst), puis les flancs globaux.
+  let s = nrm(c,'engage')*3.5 + nrm(c,'cc')*3.0 + nrm(c,'mobility')*2.0
+        + nrm(c,'burst')*1.5 + nrm(c,'global')*1.5 + nrm(c,'pick')*1.5 + nrm(c,'tankiness')*1.0;
+  // Shanei : contre une compo POKE, le splitpush et la vitesse sont LA réponse → à ban aussi
+  const famB={engage:2.5,assassin:2.0,catch:1.5,split:2.0,skirmisher:1.0,poke:1.0}[c.family]||0;
+  if(famB){s+=famB;why.push(`famille ${c.family} +${famB}`)}
+  if(S.plan==='poke'&&(c.family==='split'||c.teamfight==='splitpush'))why.push('le split est LA réponse au poke (Shanei)');
+  // « Ne JAMAIS ban un pick qui est bon pour nous » — ban gaspillé
+  const inPool=ROLES.some(r=>(DB.pool[r]||[]).includes(c.name));
+  if(inPool){s-=6;why.push('⛔ il est dans NOTRE pool : ban gaspillé −6')}
+  if(c.engage&&c.cc>=2)why.push(`engage + CC ${c.cc} : ferme la distance sur notre poke`);
+  if(c.mobility>=3)why.push('mobilité 3 : saute la backline');
+  if(c.global)why.push('pression globale (flanc/TP)');
+  // s'ils ont déjà l'engage, la vraie menace devient le burst qui tue nos carries
+  const eEngage=them.reduce((a,x)=>a+x.engage,0);
+  if(eEngage>=3&&c.burst){s+=1.5;why.push('ils ont déjà l\'engage → couper le burst +1.5')}
+  // bans 2 : viser les rôles qu'il leur reste à pick (sinon le ban est gâché)
+  const i=curIdx();
+  if(i>=12){const fr=new Set(freeRoles(S.side==='blue'?'red':'blue'));
+    if(c.roles.some(r=>fr.has(r))){s+=1.5;why.push('rôle encore ouvert chez eux +1.5')}
+    else{s-=2.5;why.push('rôle déjà rempli chez eux −2.5')}}
+  return {score:s,why};
+}
+// ce qu'ILS ont intérêt à nous ban : nos meilleurs picks restants
+function theirBanTargets(){
+  const u=unavailable(),out=[];
+  ROLES.forEach(r=>{poolFree(r).forEach(n=>{const c=BY[n];if(!c)return;
+    out.push({c,role:r,score:profileScore(c,r)+(POKE_FAM.has(c.family)&&S.plan==='poke'?2:0)})})});
+  return out.sort((a,b)=>b.score-a.score).slice(0,6);
+}
+
+// ---------- rendu ----------
+function render(){renderSeq();renderTeams();renderRecs();renderGrade();renderPool();renderSearch();renderTheirBans();save()}
+
+function renderSeq(){
+  const w=$('#seq');w.innerHTML='';const cur=curIdx();
+  ORDER.forEach((o,i)=>{
+    const d=el('div','slot '+o.s+(o.t==='ban'?' ban':'')+(i===cur?' cur':'')+(o.s===S.side?' us':'')+(S.slots[i]?'':' empty'));
+    const lbl=(o.t==='ban'?'BAN':'PICK')+' '+(o.s===S.side?'· NOUS':'');
+    d.innerHTML=`<div class="lb">${lbl}</div><div class="nm">${S.slots[i]?esc(S.slots[i]):'—'}</div>`;
+    d.onclick=()=>{if(S.slots[i]){S.slots[i]=null;S.roles[i]=null;save();render()}};
+    w.append(d)});
+  const o=ORDER[cur];
+  $('#phaseLbl').textContent=cur<0?'Draft complète':`${o.p} — ${o.t==='ban'?'ban':'pick'} ${o.s==='blue'?'bleu':'rouge'}`;
+  $('#hint').textContent=cur<0?'Draft terminée : enregistre la game pour le fearless.':
+    (isOurs(cur)?'À NOUS de jouer — choisis dans les recommandations.':'À EUX — saisis leur choix via la recherche (leur pool est infini).');
+}
+function renderTeams(){
+  const w=$('#teams');w.innerHTML='';
+  ['blue','red'].forEach(side=>{
+    const c=el('div','tcol '+side);
+    c.append(el('h4',null,(side==='blue'?'BLEU':'ROUGE')+(side===S.side?' — nous':' — eux')));
+    const ps=picksOf(side);
+    ROLES.forEach(r=>{
+      const p=ps.find(x=>x.role===r);
+      const row=el('div','prow');
+      row.innerHTML=`<span class="rtag">${RL[r]}</span><b style="flex:1">${p?esc(p.name):'<span class="muted" style="font-weight:400">—</span>'}</b>`;
+      if(p&&BY[p.name]){const ch=BY[p.name];row.append(el('span','tag',ch.family))}
+      c.append(row)});
+    const bs=bansOf(side);
+    c.append(el('div','prow',`<span class="rtag">BANS</span><span class="muted" style="flex:1;font-size:11px">${bs.length?bs.map(esc).join(', '):'—'}</span>`));
+    w.append(c)});
+}
+function renderRecs(){
+  const w=$('#recs');w.innerHTML='';const i=curIdx();
+  if(i<0){$('#recTitle').textContent='Draft complète';w.append(el('div','hint','Enregistre la game pour mettre à jour le fearless.'));return}
+  const o=ORDER[i],u=unavailable();
+  if(!isOurs(i)){$('#recTitle').textContent='À eux — '+(o.t==='ban'?'leur ban':'leur pick');
+    w.append(el('div','hint','Saisis leur choix dans « Assigner un champion ». Les suggestions reprennent quand c\'est notre tour.'));return}
+  if(o.t==='ban'){
+    $('#recTitle').textContent='Nos bans conseillés';
+    const list=DB.champions.filter(c=>!u.has(c.name)).map(c=>{const r=scoreBan(c);return{c,...r}})
+      .sort((a,b)=>b.score-a.score).slice(0,12);
+    list.forEach((x,k)=>addRec(w,k,x.c.name,x.score,x.why,()=>assign(i,x.c.name,null),
+      `${x.c.family} · engage ${x.c.engage} · pick ${x.c.pick}`));
+  }else{
+    $('#recTitle').textContent='Nos picks conseillés';
+    const fr=freeRoles(S.side);const out=[];
+    fr.forEach(r=>poolFree(r).forEach(n=>{const c=BY[n];if(!c)return;const s=scorePick(c,r,i);out.push({c,role:r,...s})}));
+    out.sort((a,b)=>b.score-a.score);
+    if(!out.length)w.append(el('div','hint','⚠ Plus aucun champion disponible dans notre pool pour les rôles restants.'));
+    out.slice(0,12).forEach((x,k)=>addRec(w,k,x.c.name,x.score,x.why,()=>assign(i,x.c.name,x.role),
+      `${RL[x.role]} · ${x.c.family}`));
+  }
+}
+function addRec(w,k,name,score,why,on,sub){
+  const r=el('div','rec');
+  r.innerHTML=`<span class="rk">${k+1}</span><span class="nm">${esc(name)} <span class="tag">${esc(sub||'')}</span></span><span class="sc">${score.toFixed(1)}</span>`;
+  r.onclick=on;w.append(r);
+  if(why&&why.length)w.append(el('div','why',why.slice(0,4).map(esc).join(' · ')));
+}
+function assign(i,name,role){S.slots[i]=name;S.roles[i]=role;save();render()}
+
+function renderSearch(){
+  const q=($('#search').value||'').toLowerCase().trim();
+  const w=$('#searchRes');w.innerHTML='';const i=curIdx();
+  if(i<0)return;
+  const u=unavailable();
+  let list=DB.champions.filter(c=>!u.has(c.name));
+  if(q)list=list.filter(c=>c.name.toLowerCase().includes(q));
+  list.slice(0,q?14:8).forEach(c=>{
+    const r=el('div','rec');
+    r.innerHTML=`<span class="nm">${esc(c.name)} <span class="tag">${esc(c.family)}</span></span>`;
+    r.onclick=()=>{
+      let role=null;
+      if(ORDER[i].t==='pick'){const fr=freeRoles(ORDER[i].s);role=c.roles.find(x=>fr.includes(x))||fr[0]||null}
+      assign(i,c.name,role);$('#search').value=''};
+    w.append(r)});
+  if(!list.length)w.append(el('div','hint','Aucun champion disponible (déjà pris / ban / fearless).'));
+}
+function renderTheirBans(){
+  const w=$('#theirBans');w.innerHTML='';
+  const t=theirBanTargets();
+  if(!t.length){w.append(el('div','hint','—'));return}
+  w.append(el('div','hint','Nos champions les plus précieux : ce sont eux qu\'ils vont retirer. Prépare un plan B par rôle.'));
+  t.forEach((x,k)=>{const r=el('div','rec');
+    r.innerHTML=`<span class="rk">${k+1}</span><span class="nm">${esc(x.c.name)} <span class="tag">${RL[x.role]}</span></span><span class="sc">${x.score.toFixed(1)}</span>`;
+    w.append(r)});
+}
+// ---------- grille Kazewa + garde-fous Shanei ----------
+function renderGrade(){
+  const ours=compOf(S.side),them=compOf(S.side==='blue'?'red':'blue');
+  const g=$('#grade');g.innerHTML='';
+  const sum=(a,k)=>a.reduce((x,c)=>x+c[k],0);
+  const id=identity(ours);
+  const bloc4=picksOf(S.side).filter(p=>p.role&&p.role!=='top').map(p=>BY[p.name]).filter(Boolean);
+  const tank4=bloc4.some(c=>c.tankiness>=2);
+  const front=ours.filter(c=>c.tankiness>=2||c.teamfight==='frontline').length;
+  // DPS = dégâts continus sur objectif (un mage de contrôle compte, même si burst=1)
+  const dps=ours.filter(c=>['backline_dps','aoe','control_mage','poke'].includes(c.teamfight)
+        ||['marksman','hypercarry','control_mage','poke'].includes(c.family)).length;
+  const diseng=ours.filter(c=>c.disengage&&(c.cc>=2||c.anti_dive||['enchanter','tank'].includes(c.family))).length;
+  const eng=sum(ours,'engage');
+  const adw=ours.reduce((a,c)=>a+(c.damage==='ad'?1:c.damage==='mixed'?.5:0),0);
+  const apw=ours.reduce((a,c)=>a+(c.damage==='ap'?1:c.damage==='mixed'?.5:0),0);
+  const imm=ours.filter(c=>c.mobility===0).length;
+  // --- grille Kazewa : 5 critères, il en faut 3-4 sur 5 ---
+  const K=[['Composition',id.coherence>=0.35],
+           ['Tank bloc de 4',tank4],
+           ['Setup objectif',dps>=2&&front>=1],
+           ['Teamfight',front>=1&&(eng>=1||diseng>=2)&&dps>=2],
+           ['Équilibre',adw<4.5&&apw<4.5&&imm<=1]];
+  const ok=K.filter(k=>k[1]).length;
+  K.forEach(([k,v])=>{const t=el('div','t');
+    t.innerHTML=`<div class="k">${k}</div><div class="v" style="color:${v?'var(--fav)':'var(--bad)'}">${v?'✓':'✗'}</div>`;g.append(t)});
+  const verd=ours.length<3?['— en cours','var(--muted)']:ok>=4?['Draft gagnée','var(--fav)']:ok===3?['Jouable','var(--warn)']:['Draft perdue','var(--bad)'];
+  const t=el('div','t');t.innerHTML=`<div class="k">Verdict ${ok}/5</div><div class="v" style="color:${verd[1]};font-size:13px">${verd[0]}</div>`;g.append(t);
+  // --- garde-fous : hard blocks Shanei + malus chiffrés Kazewa ---
+  const w=$('#warns');w.innerHTML='';
+  const add=(ic,txt,cls)=>w.append(el('div','warn',`<span class="ic">${ic}</span><span class="${cls||''}">${txt}</span>`));
+  const bot=picksOf(S.side).find(p=>p.role==='bot'),sup=picksOf(S.side).find(p=>p.role==='sup');
+  const bc=bot&&BY[bot.name],sc=sup&&BY[sup.name];
+  if(bc&&sc&&(bc.family==='poke'||bc.poke>=2&&!bc.engage)&&sc.family==='engage'&&sc.engage)
+    add('⛔',`<b>${esc(bc.name)} + ${esc(sc.name)}</b> : ADC poke + support engage — l'anti-exemple canonique de Shanei (« Ezreal + Leona »). Choisis un plan, pas un mix.`);
+  if(ours.length>=4&&front===0)add('⛔','Aucune frontline : « sans front line, la back line n\'existe pas » (Kazewa).');
+  if(ours.length>=4&&!tank4)add('⚠','Pas de tank dans le bloc de 4 (jng/mid/bot/sup) — la règle la plus répétée de Shanei.');
+  if(adw>=4.5||apw>=4.5)add('⛔',`Dégâts à sens unique (${adw} AD / ${apw} AP) : une seule résistance à acheter.`);
+  if(imm>=2)add('⛔',`${imm} champions immobiles : Kazewa chiffre ça à −15 sur la draft.`);
+  if(ours.length>=4&&id.coherence<0.10)add('⛔','Compo sans identité (« half-assed ») : tes joueurs ne sauront pas quoi faire.');
+  if(ours.length>=4&&id.name==='poke'&&diseng<=1)add('⚠','Compo poke sans désengage : il en faut 3 à 5 (Shanei).');
+  if(ours.length>=4&&dps===0)add('⛔','Full burst, aucun DPS : impossible de faire un objectif (Kazewa).');
+  const eEng=sum(them,'engage');
+  if(eEng>=3&&diseng<2)add('⚠',`${eEng} engageurs en face pour ${diseng} source(s) de désengage.`);
+  // ordre de draft
+  const po=picksOf(S.side);
+  const topP=po.findIndex(p=>p.role==='top'),supP=po.findIndex(p=>p.role==='sup');
+  if(topP>=0&&po.length===5&&topP!==4)add('⚠','Le top n\'a pas été pické en last : « c\'est TOUJOURS en last pick » (Shanei).');
+  if(topP>=0&&supP>=0&&topP<supP)add('⚠','Top pické avant le support : inverse l\'ordre de counterpick.');
+  if(ours.length&&!w.children.length)add('✅',`Identité <b>${id.name}</b> (cohérence ${(id.coherence*100).toFixed(0)}%) — aucune incohérence détectée.`,'muted');
+}
+// ---------- fearless ----------
+function renderPool(){
+  const w=$('#poolHealth');w.innerHTML='';
+  const games=S.fmt==='bo5'?5:3,left=games-S.game+1;
+  const u=unavailable();
+  const info=el('div','muted');info.style.cssText='font-size:11.5px;margin-bottom:8px';
+  info.innerHTML=`Game <b>${S.game}</b>/${games} · il reste <b>${left}</b> game(s) à drafter · mode <b>${S.fearless}</b>`;
+  w.append(info);
+  ROLES.forEach(r=>{
+    const all=DB.pool[r]||[],free=all.filter(c=>!u.has(c));
+    const row=el('div');row.style.margin='7px 0';
+    const crit=free.length<left;
+    row.innerHTML=`<div style="display:flex;align-items:center;gap:8px">
+      <span class="rtag">${RL[r]}</span>
+      <span class="bar"><span style="width:${Math.min(100,free.length/Math.max(1,all.length)*100)}%;background:${crit?'var(--bad)':free.length<=left+1?'var(--warn)':'var(--fav)'}"></span></span>
+      <b style="font-variant-numeric:tabular-nums;color:${crit?'var(--bad)':'var(--ink)'}">${free.length}/${all.length}</b></div>`;
+    const pool=el('div','pool');
+    all.forEach(c=>{const s=el('span','pc'+(u.has(c)?' used':''),esc(c));pool.append(s)});
+    row.append(pool);
+    if(crit)row.append(el('div','tag b',`⛔ ${free.length} dispo pour ${left} game(s) restantes`));
+    w.append(row)});
+}
+function nextGame(){
+  const b=picksOf('blue').map(p=>p.name),r=picksOf('red').map(p=>p.name);
+  if(!b.length&&!r.length){alert('Aucun pick à enregistrer.');return}
+  S.history.push({blue:b,red:r});
+  S.game=Math.min((S.fmt==='bo5'?5:3),S.game+1);
+  S.slots=ORDER.map(()=>null);S.roles=ORDER.map(()=>null);
+  save();renderSetup();render();
+}
+boot();
+</script>
+</body></html>
