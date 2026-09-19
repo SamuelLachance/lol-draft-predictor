@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LoL Esports Predictor — Ratings & Picks</title>
+<style>
+:root{--bg:#0b0e14;--panel:#141a24;--sunk:#0e131b;--line:#232c3a;--line2:#2e3a4d;
+--ink:#e6edf3;--muted:#8b98a9;--faint:#5c6a7a;--accent:#0ac8b9;--gold:#c8aa6e;
+--fav:#3fb950;--bad:#e5534b;--warn:#e3b341;--favbg:rgba(63,185,80,.12)}
+:root[data-t=light]{--bg:#f5f7fa;--panel:#fff;--sunk:#eef1f5;--line:#e2e7ee;--line2:#d3dae4;
+--ink:#0d1520;--muted:#5a6675;--faint:#8b98a9;--favbg:rgba(63,185,80,.1)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,Segoe UI,Roboto,Inter,sans-serif}
+a{color:var(--accent);text-decoration:none}
+.wrap{max-width:1120px;margin:0 auto;padding:0 18px 60px}
+header{display:flex;align-items:center;gap:14px;padding:20px 0 14px;border-bottom:1px solid var(--line)}
+.logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--gold));display:grid;place-items:center;font-weight:800;color:#06121a}
+h1{font-size:18px;margin:0;letter-spacing:.2px}
+.sub{color:var(--muted);font-size:12px}
+.spacer{flex:1}
+.tog{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:15px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.card .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+.card .v{font-size:22px;font-weight:700;margin-top:3px}
+.card .v small{font-size:12px;color:var(--muted);font-weight:500}
+nav.tabs{display:flex;gap:6px;margin:8px 0 16px;flex-wrap:wrap}
+.tab{background:transparent;border:1px solid var(--line);color:var(--muted);padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:600;font-size:13px}
+.tab.on{background:var(--accent);color:#06121a;border-color:var(--accent)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.phead{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.phead h3{margin:0;font-size:14px}
+.filt{background:var(--sunk);border:1px solid var(--line);color:var(--muted);padding:5px 10px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600}
+.filt.on{background:var(--accent);color:#06121a;border-color:var(--accent)}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:9px 14px;text-align:left;white-space:nowrap}
+th{color:var(--faint);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line)}
+td{border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--sunk)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.rk{color:var(--faint);width:34px}
+.rtg{font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums}
+.elo{font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+.tag{font-size:10px;color:var(--muted);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;margin-left:6px}
+.bar{height:7px;border-radius:5px;background:var(--sunk);overflow:hidden;min-width:80px}
+.bar>span{display:block;height:100%;background:var(--accent)}
+.ok{color:var(--fav)}.no{color:var(--bad)}
+.chip{display:inline-block;padding:2px 7px;border-radius:6px;font-size:11px;font-weight:700}
+select{background:var(--sunk);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px 11px;font-size:14px;min-width:180px}
+.pred{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:center;padding:22px 18px}
+.side{text-align:center}.side .nm{font-weight:700;font-size:16px}.side .el{color:var(--muted);font-size:12px}
+.wpbig{font-size:34px;font-weight:800}
+.wpbar{height:14px;border-radius:8px;overflow:hidden;background:var(--bad);margin:14px 16px}
+.wpbar>span{display:block;height:100%;background:var(--fav)}
+footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
+.muted{color:var(--muted)}
+.lnk{cursor:pointer;border-bottom:1px dashed var(--line2)}
+.lnk:hover{color:var(--accent)}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;place-items:start center;overflow:auto;z-index:50;padding:38px 14px}
+.sheet{background:var(--panel);border:1px solid var(--line2);border-radius:16px;max-width:660px;width:100%;box-shadow:0 24px 70px rgba(0,0,0,.5)}
+.mhead{display:flex;align-items:center;gap:8px;padding:15px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.mhead h2{margin:0;font-size:19px}
+.mx{background:var(--sunk);border:1px solid var(--line);color:var(--ink);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:15px;line-height:1}
+.mbody{padding:16px 18px}
+.mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px;margin:10px 0}
+.mini .t{background:var(--sunk);border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+.mini .t .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+.mini .t .v{font-size:16px;font-weight:700;margin-top:2px}
+.brow{display:flex;align-items:center;gap:9px;margin:5px 0;font-size:12px}
+.brow .lbl{width:96px;color:var(--muted);flex:none}
+.brow .val{width:52px;text-align:right;font-variant-numeric:tabular-nums;flex:none}
+.brow .bar{flex:1;background:var(--sunk)}
+.sec{margin:16px 0 7px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--faint)}
+.mt table{font-size:12px}.mt th,.mt td{padding:6px 10px}
+</style></head>
+<body><div class="wrap">
+<header>
+  <div class="logo">LP</div>
+  <div><h1>LoL Esports Predictor</h1><div class="sub" id="sub">loading…</div></div>
+  <div class="spacer"></div>
+  <a class="tab" href="draft/" style="text-decoration:none;line-height:1.1">🎯 Draft Assistant</a>
+  <button class="tog" id="tog" title="Theme">◐</button>
+</header>
+
+<div class="cards" id="cards"></div>
+
+<nav class="tabs" id="tabs">
+  <button class="tab on" data-v="picks">Schedule &amp; Picks</button>
+  <button class="tab" data-v="teams">Teams</button>
+  <button class="tab" data-v="players">Players</button>
+  <button class="tab" data-v="champions">Champions</button>
+  <button class="tab" data-v="predict">Predict a match</button>
+</nav>
+
+<div id="view"></div>
+
+<footer>Model: Team Elo + player TrueSkill + Draft · causal, forward-tested on Oracle&rsquo;s Elixir (2014–present).
+Draft alone ≈ 55%; with team strength ≈ 63% overall, up to ~89% on lopsided matchups.
+Player ratings weight individual performance over team context. Ratings reflect the latest major-league season in the data (see “data through” above). Built for esports analysis, not betting advice.</footer>
+</div>
+
+<script>
+const $=s=>document.querySelector(s), el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e};
+const ROLES=()=>['top','jng','mid','bot','sup'];
+const state={teams:[],players:[],champions:[],matches:[],meta:{},regions:[],pool:[],view:'picks',tLeague:'ALL',pRole:'mid',cRole:'mid'};
+const pct=x=>Math.round(x*100)+'%';
+async function j(f){const r=await fetch('data/'+f+'.json');return r.json()}
+
+async function boot(){
+  [state.teams,state.players,state.champions,state.matches,state.meta,state.regions,state.pool]=await Promise.all(
+    ['teams','players','champions','matches','meta','regions','champ_pool'].map(f=>j(f).catch(()=>[])));
+  $('#sub').textContent=`${state.meta.n_teams} teams · ${state.meta.n_players} players · data through ${state.meta.data_through||state.meta.updated} · rebuilt ${state.meta.updated}`;
+  buildIndexes();
+  cards(); render();
+  $('#tabs').onclick=e=>{const b=e.target.closest('.tab');if(!b)return;
+    [...$('#tabs').children].forEach(t=>t.classList.toggle('on',t===b));state.view=b.dataset.v;render()};
+  $('#tog').onclick=()=>{const r=document.documentElement;r.dataset.t=r.dataset.t==='light'?'':'light'};
+  document.body.addEventListener('click',e=>{
+    const pl=e.target.closest('[data-player]'),tm=e.target.closest('[data-team]');
+    if(pl)openCard({type:'player',name:pl.dataset.player,role:pl.dataset.role});
+    else if(tm)openCard({type:'team',name:tm.dataset.team});
+  });
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+}
+function buildIndexes(){
+  state.modalStack=[];
+  state.tidx=Object.fromEntries(state.teams.map(t=>[t.team,t]));
+  state.pidx={};state.players.forEach(p=>state.pidx[p.player+'|'+p.role]=p);
+  state.regidx=Object.fromEntries((state.regions||[]).map(r=>[r.region,r]));
+  state.roleStats={};
+  ['top','jng','mid','bot','sup'].forEach(ro=>{
+    const ps=state.players.filter(p=>p.role===ro),col=f=>ps.map(f).filter(v=>v!=null).sort((a,b)=>a-b);
+    state.roleStats[ro]={gd15:col(p=>p.gd15),kp:col(p=>p.kp),kda:col(p=>p.kda),dmg:col(p=>p.dmg||0)};
+  });
+}
+function cards(){
+  const m=state.meta;
+  $('#cards').innerHTML='';
+  const data=[['Data through',(m.data_through||m.updated)+(m.n_games?` <small>${m.n_games.toLocaleString()} games</small>`:'')],
+    ['Recent accuracy',pct(m.recent_acc)+' <small>last 300</small>'],
+    ['Model',m.model],['Teams rated',m.n_teams],['Players rated',m.n_players]];
+  data.forEach(([k,v])=>{const c=el('div','card');c.append(el('div','k',k),el('div','v',v));$('#cards').append(c)});
+}
+const panel=(title,extra)=>{const p=el('div','panel');const h=el('div','phead');h.append(el('h3',null,title));if(extra)h.append(extra);p.append(h);return p};
+const filterBar=(opts,cur,on)=>{const w=el('div');w.style.display='flex';w.style.gap='6px';w.style.flexWrap='wrap';
+  opts.forEach(([k,l])=>{const b=el('button','filt'+(k===cur?' on':''),l);b.onclick=()=>on(k);w.append(b)});return w};
+
+function render(){
+  const v=$('#view');v.innerHTML='';
+  if(state.view==='picks')return v.append(picks());
+  if(state.view==='teams')return v.append(teams());
+  if(state.view==='players')return v.append(players());
+  if(state.view==='champions')return v.append(champs());
+  if(state.view==='predict')return v.append(predict());
+}
+function tableEl(head,rows){const s=el('div','scroll'),t=el('table');
+  t.innerHTML='<thead><tr>'+head.map(h=>`<th class="${h[1]||''}">${h[0]}</th>`).join('')+'</tr></thead>';
+  const tb=el('tbody');rows.forEach(r=>tb.append(r));t.append(tb);s.append(t);return s}
+
+function picks(){
+  const p=panel('Schedule & Picks — recent results vs model');
+  const rows=state.matches.slice(0,120).map(m=>{
+    const tr=el('tr'),ok=(m.pred>=.5)===(m.blue_win===1);
+    const fav=m.pred>=.5?m.blue:m.red, fp=m.pred>=.5?m.pred:1-m.pred;
+    tr.innerHTML=`<td class="muted">${m.date}</td>
+      <td><b class="lnk" data-team="${ea(m.blue)}">${m.blue}</b> <span class="muted">vs</span> <span class="lnk" data-team="${ea(m.red)}">${m.red}</span></td>
+      <td><span class="lnk" data-team="${ea(fav)}">${fav}</span> <span class="chip" style="background:var(--favbg);color:var(--fav)">${pct(fp)}</span></td>
+      <td>${m.blue_win?'<b>'+m.blue+'</b>':'<b>'+m.red+'</b>'}</td>
+      <td class="${ok?'ok':'no'}">${ok?'✓':'✗'}</td>`;
+    return tr;
+  });
+  p.append(tableEl([['Date'],['Match'],['Model pick'],['Winner'],['Hit']],rows));return p;
+}
+function teams(){
+  const regs=['ALL',...state.regions.map(r=>r.region)];
+  const bar=filterBar(regs.map(l=>[l,l]),state.tLeague,k=>{state.tLeague=k;render()});
+  const wrap=el('div');
+  if(state.regions.length){const rb=el('div');rb.style.cssText='display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line)';
+    state.regions.forEach(r=>{const c=el('span','chip');c.style.cssText='background:var(--sunk);border:1px solid var(--line2);color:var(--ink);padding:4px 9px';
+      c.innerHTML=`<b>${r.region}</b> <span class="elo">${r.rating}</span>`;rb.append(c)});
+    wrap.append(el('div','k','International region strength (from Worlds/MSI/EWC results)'),rb);}
+  const p=panel('Team power ratings — region-calibrated Elo',bar);
+  let list=state.teams.filter(t=>state.tLeague==='ALL'||t.region===state.tLeague);
+  const rows=list.map((t,i)=>{const tr=el('tr');
+    tr.innerHTML=`<td class="rk">${i+1}</td><td><b class="lnk" data-team="${ea(t.team)}">${t.team}</b><span class="tag">${t.league}</span><span class="tag">${t.region}</span></td>
+      <td class="elo num">${t.power}</td><td class="num muted">${t.elo}</td>
+      <td class="num">${t.ts_mu!=null?t.ts_mu:'–'}</td><td class="num">${t.wins}-${t.losses}</td><td class="num">${pct(t.wr)}</td>`;return tr});
+  p.append(tableEl([['#','rk'],['Team'],['Power','num'],['Raw Elo','num'],['Roster TS','num'],['Record','num'],['Win%','num']],rows));
+  wrap.append(p);return wrap;
+}
+function players(){
+  const roles=[['top','Top'],['jng','Jungle'],['mid','Mid'],['bot','Bot'],['sup','Support']];
+  const bar=filterBar(roles,state.pRole,k=>{state.pRole=k;render()});
+  const p=panel('Player ratings — TrueSkill 2 (team result + individual performance)',bar);
+  const list=state.players.filter(x=>x.role===state.pRole).slice(0,60);
+  const rows=list.map((x,i)=>{const tr=el('tr');
+    tr.innerHTML=`<td class="rk">${i+1}</td><td><b class="lnk" data-player="${ea(x.player)}" data-role="${x.role}">${x.player}</b> <span class="muted lnk" data-team="${ea(x.team)}">${x.team}</span><span class="tag">${x.league}</span></td>
+      <td class="rtg num">${x.rating.toFixed(1)}</td><td class="num muted">${x.team_pw}</td><td class="num">${pct(x.wr)}</td>
+      <td class="num">${pct(x.kp)}</td><td class="num">${x.kda}</td>`;return tr});
+  p.append(tableEl([['#','rk'],['Player'],['Rating','num'],['Team','num'],['Win%','num'],['KP','num'],['KDA','num']],rows));return p;
+}
+function champs(){
+  const roles=[['top','Top'],['jng','Jungle'],['mid','Mid'],['bot','Bot'],['sup','Support']];
+  const bar=filterBar(roles,state.cRole,k=>{state.cRole=k;render()});
+  const p=panel('Champion ratings — TrueSkill',bar);
+  const list=state.champions.filter(x=>x.role===state.cRole).slice(0,50);
+  const rows=list.map((x,i)=>{const tr=el('tr');
+    tr.innerHTML=`<td class="rk">${i+1}</td><td><b>${x.champion}</b></td>
+      <td class="rtg num">${x.ts.toFixed(1)}</td><td class="num">${pct(x.wr)}</td>
+      <td class="num">${x.games}</td><td class="num">${x.gd15>0?'+':''}${x.gd15}</td>`;return tr});
+  p.append(tableEl([['#','rk'],['Champion'],['TrueSkill','num'],['Win%','num'],['Games','num'],['GD@15','num']],rows));return p;
+}
+function predict(){
+  const p=panel('Predict a matchup — team strength × draft (the Kazewa model)');
+  const teams=[...state.teams].sort((a,b)=>a.team.localeCompare(b.team));
+  const TM=Object.fromEntries(state.teams.map(t=>[t.team,t]));
+  const BL=state.meta.blend||{w0:0,elo:1,ts:0};
+  const erf=x=>{const t=1/(1+0.3275911*Math.abs(x));const yy=1-(((((1.061405429*t-1.453152027)*t+1.421413741)*t-0.284496736)*t+0.254829592)*t)*Math.exp(-x*x);return x>=0?yy:-yy};
+  // full champion pool — ANY champ at ANY position (flex picks + future meta shifts)
+  const pool=(state.pool&&state.pool.length?state.pool:state.champions).slice().sort((a,b)=>a.champion.localeCompare(b.champion));
+  const cRate=Object.fromEntries(pool.map(c=>[c.champion,c.ts]));
+  const wrap=el('div');wrap.style.padding='16px';
+  const selA=el('select'),selB=el('select');
+  teams.forEach(t=>{selA.append(new Option(`${t.team} (${t.elo})`,t.team));selB.append(new Option(`${t.team} (${t.elo})`,t.team))});
+  selA.selectedIndex=0;selB.selectedIndex=Math.min(1,teams.length-1);
+  const row=el('div');row.style.cssText='display:flex;gap:12px;flex-wrap:wrap;align-items:center';
+  row.append(selA,el('span','muted','vs'),selB);
+  const out=el('div');
+  // optional drafts
+  const draftToggle=el('button','filt','＋ Add drafts (optional)');draftToggle.style.marginTop='12px';
+  const draftBox=el('div');draftBox.style.display='none';draftBox.style.marginTop='12px';
+  const picks={blue:{},red:{}};
+  function champSel(side,role){
+    const s=el('select');s.style.minWidth='140px';s.append(new Option('— '+role+' —',''));
+    pool.forEach(c=>s.append(new Option(`${c.champion} (${c.ts.toFixed(0)})`,c.champion)));
+    s.onchange=()=>{picks[side][role]=s.value;go()};return s;
+  }
+  const grid=el('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:18px';
+  ['blue','red'].forEach(side=>{
+    const col=el('div');col.append(el('div','k',(side==='blue'?'Blue':'Red')+' draft'));
+    ROLES().forEach(role=>{const r=el('div');r.style.margin='6px 0';r.append(champSel(side,role));col.append(r)});
+    grid.append(col);
+  });
+  draftBox.append(grid);
+  draftToggle.onclick=()=>{const open=draftBox.style.display==='none';draftBox.style.display=open?'block':'none';draftToggle.textContent=open?'－ Hide drafts':'＋ Add drafts (optional)'};
+  function draftAvg(side){const v=ROLES().map(r=>cRate[picks[side][r]]).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
+  function go(){
+    const a=selA.value,b=selB.value,TA=TM[a],TB=TM[b]; const BETA=25/6;
+    const pElo=1/(1+Math.pow(10,(TB.power-TA.power)/400)); let eLog=Math.log(pElo/(1-pElo)),tLog=0,tstxt='';
+    if(TA.ts_mu!=null&&TB.ts_mu!=null){const mu=TA.ts_mu-TB.ts_mu,s2=TA.ts_sig*TA.ts_sig+TB.ts_sig*TB.ts_sig+10*BETA*BETA;
+      let tp=0.5*(1+erf(mu/Math.sqrt(2*s2)));tp=Math.min(.999,Math.max(.001,tp));tLog=Math.log(tp/(1-tp));tstxt=` · roster TS ${TA.ts_mu} vs ${TB.ts_mu}`;}
+    let base=1/(1+Math.exp(-(BL.w0+BL.elo*eLog+BL.ts*tLog)));
+    const da=draftAvg('blue'),dr=draftAvg('red'); let delta=0,dtxt='no draft entered';
+    if(da!=null&&dr!=null){delta=Math.max(-0.07,Math.min(0.07,0.02*(da-dr)));dtxt=`draft edge ${(delta>=0?'+':'')}${Math.round(delta*100)}%`}
+    const pa=Math.max(.02,Math.min(.98,base+delta));
+    out.innerHTML=`<div class="pred">
+      <div class="side"><div class="nm">${a}</div><div class="el">Power ${TA.power} · ${TA.region}</div><div class="wpbig" style="color:var(--fav)">${pct(pa)}</div></div>
+      <div class="muted">win<br>prob</div>
+      <div class="side"><div class="nm">${b}</div><div class="el">Power ${TB.power} · ${TB.region}</div><div class="wpbig" style="color:var(--bad)">${pct(1-pa)}</div></div></div>
+      <div class="wpbar"><span style="width:${pa*100}%"></span></div>
+      <div class="muted" style="padding:2px 18px 4px">Base ${pct(base)} — Elo + player TrueSkill${tstxt} · ${dtxt}</div>
+      <div class="muted" style="padding:0 18px 14px;font-size:11px">Region-calibrated. Team strength + player TrueSkill drive it (~65%); the draft nudges it (Kazewa).</div>`;
+  }
+  selA.onchange=go;selB.onchange=go;wrap.append(row,draftToggle,draftBox,out);p.append(wrap);go();return p;
+}
+
+// ---------- detail cards (click a player or team name) ----------
+const ea=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+function pctileOf(role,stat,v){const a=(state.roleStats[role]||{})[stat];if(!a||!a.length||v==null)return .5;let lo=0;for(const x of a)if(x<v)lo++;return lo/a.length}
+const barColor=p=>p>=.6?'var(--fav)':p>=.35?'var(--warn)':'var(--bad)';
+function segRow(lbl,val,frac,color){const r=el('div','brow');
+  r.innerHTML=`<span class="lbl">${lbl}</span><span class="val" style="color:${color}">${val}</span>`;
+  const bar=el('div','bar'),sp=el('span');sp.style.width=Math.max(2,Math.min(100,frac*100))+'%';sp.style.background=color;
+  bar.append(sp);r.append(bar);return r}
+function miniTiles(pairs){const w=el('div','mini');pairs.forEach(([k,v])=>{const t=el('div','t');
+  t.innerHTML=`<div class="k">${k}</div><div class="v">${v}</div>`;w.append(t)});return w}
+function closeModal(){const m=$('#modal');if(m)m.style.display='none';state.modalStack=[]}
+function openCard(ref,push){
+  if(push!==false)state.modalStack.push(ref);
+  let m=$('#modal');
+  if(!m){m=el('div','modal-bg');m.id='modal';document.body.append(m);m.addEventListener('click',e=>{if(e.target===m)closeModal()})}
+  m.innerHTML='';const sheet=el('div','sheet');
+  sheet.append(ref.type==='player'?playerCard(ref.name,ref.role):teamCard(ref.name));
+  m.append(sheet);m.style.display='grid';m.scrollTop=0;
+}
+function backBtn(){const b=el('button','mx','‹');b.title='Back';
+  b.onclick=()=>{state.modalStack.pop();const prev=state.modalStack[state.modalStack.length-1];prev?openCard(prev,false):closeModal()};return b}
+function closeX(){const b=el('button','mx','✕');b.style.marginLeft='auto';b.onclick=closeModal;return b}
+function mtable(head,rows){const mt=el('div','mt');mt.append(tableEl(head,rows));return mt}
+
+function playerCard(name,role){
+  const p=state.pidx[name+'|'+role],wrap=el('div');
+  if(!p){wrap.append(el('div','mhead',`<h2>${name}</h2>`),el('div','mbody','No detailed data for this player.'));return wrap}
+  const h=el('div','mhead');if(state.modalStack.length>1)h.append(backBtn());
+  h.append(el('h2',null,p.player),el('span','tag',role.toUpperCase()));
+  const tl=el('span','tag lnk');tl.dataset.team=p.team;tl.textContent=p.team;h.append(tl);
+  h.append(el('span','tag',p.league),el('span','tag',p.region),closeX());
+  const b=el('div','mbody');
+  b.append(el('div',null,`<div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px">Rating</div><div class="rtg" style="font-size:30px">${p.rating.toFixed(1)}</div>`));
+  b.append(el('div','sec','How the rating is built'));
+  const mag=Math.max(Math.abs(p.c_ind),Math.abs(p.c_team),8);
+  b.append(segRow('Individual',(p.c_ind>=0?'+':'')+p.c_ind.toFixed(1),Math.abs(p.c_ind)/mag,p.c_ind>=0?'var(--gold)':'var(--bad)'));
+  b.append(segRow('Team context',(p.c_team>=0?'+':'')+p.c_team.toFixed(1),Math.abs(p.c_team)/mag,p.c_team>=0?'var(--accent)':'var(--bad)'));
+  b.append(el('div','muted',`<span style="font-size:11px">+50 base · team power ${p.team_pw} · ${p.games} games · individual perf is the primary signal</span>`));
+  b.append(miniTiles([['Winrate',pct(p.wr)],['Record',`${p.wins}-${p.losses}`],['KP',pct(p.kp)],['KDA',p.kda]]));
+  b.append(el('div','sec','vs role peers (percentile)'));
+  [['GD@15','gd15',p.gd15],['Dmg share','dmg',p.dmg],['KP','kp',p.kp],['KDA','kda',p.kda]].forEach(([lbl,st,v])=>{
+    const pc=pctileOf(role,st,v),disp=st==='gd15'?((v>0?'+':'')+v):(st==='dmg'||st==='kp')?pct(v):v;
+    b.append(segRow(lbl,disp,pc,barColor(pc)));});
+  if(p.champs&&p.champs.length){b.append(el('div','sec','Champion pool (this season)'));
+    b.append(mtable([['Champion'],['G','num'],['WR','num'],['KDA','num']],
+      p.champs.map(c=>{const tr=el('tr');tr.innerHTML=`<td><b>${c.champion}</b></td><td class="num">${c.games}</td><td class="num">${pct(c.wr)}</td><td class="num">${c.kda}</td>`;return tr})));}
+  if(p.recent&&p.recent.length){b.append(el('div','sec','Recent games'));
+    b.append(mtable([['Date'],['Champion'],['R'],['K/D/A','num'],['GD@15','num'],['vs']],
+      p.recent.map(g=>{const tr=el('tr');tr.innerHTML=`<td class="muted">${g.date}</td><td><b>${g.champion}</b></td><td class="${g.win?'ok':'no'}">${g.win?'W':'L'}</td><td class="num">${g.k}/${g.d}/${g.a}</td><td class="num">${g.gd15>0?'+':''}${g.gd15}</td><td><span class="lnk" data-team="${ea(g.opp)}">${g.opp}</span></td>`;return tr})));}
+  wrap.append(h,b);return wrap;
+}
+function teamCard(name){
+  const t=state.tidx[name],wrap=el('div');
+  if(!t){wrap.append(el('div','mhead',`<h2>${name}</h2>`),el('div','mbody','No detailed data for this team.'));return wrap}
+  const h=el('div','mhead');if(state.modalStack.length>1)h.append(backBtn());
+  h.append(el('h2',null,t.team),el('span','tag',t.league),el('span','tag',t.region),
+    el('span','muted',`${t.wins}-${t.losses} · ${pct(t.wr)}`),closeX());
+  const b=el('div','mbody');
+  b.append(miniTiles([['Power',t.power],['Raw Elo',t.elo],['Roster TS',t.ts_mu!=null?t.ts_mu:'–'],['Games',t.games]]));
+  const reg=state.regidx[t.region]||{};
+  b.append(el('div','sec','Power = region strength + edge within region'));
+  b.append(el('div','muted',`<span style="font-size:11px">${t.region} base ${t.reg_base!=null?t.reg_base:(reg.rating||'?')} + (Elo ${t.elo} − region avg ${t.reg_mean!=null?t.reg_mean:(reg.mean_team_elo||'?')}) = <b style="color:var(--gold)">${t.power}</b></span>`));
+  if(t.roster&&t.roster.length){b.append(el('div','sec','Roster'));
+    b.append(mtable([['Role'],['Player'],['Rating','num'],['KP','num'],['KDA','num']],
+      t.roster.map(m=>{const pp=state.pidx[m.player+'|'+m.role],tr=el('tr');
+        tr.innerHTML=`<td><span class="tag">${m.role.toUpperCase()}</span></td><td><b class="lnk" data-player="${ea(m.player)}" data-role="${m.role}">${m.player}</b></td><td class="rtg num">${pp?pp.rating.toFixed(1):'–'}</td><td class="num">${pp?pct(pp.kp):'–'}</td><td class="num">${pp?pp.kda:'–'}</td>`;return tr})));}
+  if(t.matches&&t.matches.length){b.append(el('div','sec','Recent matches (model pick vs result)'));
+    b.append(mtable([['Date'],['Match'],['Model'],['Res'],['Hit']],
+      t.matches.map(m=>{const tr=el('tr'),ok=(m.pred>=.5)===(m.win===1);
+        tr.innerHTML=`<td class="muted">${m.date}</td><td><span class="lnk" data-team="${ea(m.opp)}">${m.opp}</span> <span class="muted" style="font-size:10px">(${m.side})</span></td><td><span class="chip" style="background:var(--favbg);color:var(--fav)">${pct(m.pred)}</span></td><td class="${m.win?'ok':'no'}">${m.win?'W':'L'}</td><td class="${ok?'ok':'no'}">${ok?'✓':'✗'}</td>`;return tr})));}
+  wrap.append(h,b);return wrap;
+}
+boot();
+</script>
+</body></html>
