@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: daily-board
+  group: site-deploy        # partage avec live-update : jamais deux deploiements en meme temps
   cancel-in-progress: false
 
 jobs:
@@ -42,6 +42,13 @@ jobs:
         continue-on-error: true
         run: python ml/fetch_hf.py --upload
 
+      # Picks/bans/objectifs (pages de match Worlds). Premier run = backfill depuis 2025-01-01 (~3 min).
+      - name: Refresh enriched games + Worlds schedule
+        run: |
+          gh release download board-data --pattern games_rich.parquet -D data --clobber || true
+          python ml/fetch_rich.py
+          gh release upload board-data data/games_rich.parquet --clobber
+
       - name: Prepare input for the build (always from the snapshot)
         run: |
           mkdir -p data/processed
@@ -52,6 +59,7 @@ jobs:
           python ml/build_drafts.py
           python ml/build_drafts_team.py
           python ml/build_board.py
+          python ml/build_worlds.py
 
       - name: Show summary
         run: cat web/public/data/meta.json

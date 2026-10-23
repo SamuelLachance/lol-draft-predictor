@@ -83,8 +83,19 @@ def val(row: dict, *names):
     return None
 
 
+# tournois LP dont le NOM commence par un prefixe tier-1 mais qui sont des divisions inferieures / qualifs
+# (ex. "LCK Academy Series", "LCP Wildcard", "Esports World Cup 2026 Online Qualifier") : exclus
+MINOR = re.compile(r"Academy|Challenger|Wildcard|Promotion|Qualifier|Qualifying|Showmatch|Youth|Rookies|Scholars|Open Ladder|\b(AS|CL|OPQ)\b|Fan Clash", re.I)
+
+
+def is_minor(s) -> bool:
+    return bool(MINOR.search(str(s or "")))
+
+
 def league_of(tournament: str) -> str | None:
     t = str(tournament or "")
+    if is_minor(t):
+        return None
     for pref in sorted(LEAGUES, key=len, reverse=True):
         if t.startswith(pref + " ") or t == pref:
             return LEAGUES[pref]
@@ -194,6 +205,7 @@ def main() -> int:
           f"({pd.to_datetime(fresh.date).min()} a {pd.to_datetime(fresh.date).max()})")
 
     if base is not None:
+        base = base[~base.gameid.map(is_minor)]          # purge des games mineures deja ingerees par erreur
         keep = base[~base.gameid.isin(set(fresh.gameid))]
         combined = pd.concat([keep, fresh], ignore_index=True, sort=False)
     else:

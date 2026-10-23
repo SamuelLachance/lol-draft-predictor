@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="fr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Match — Worlds 2026 · LoL Esports Predictor</title>
+<link rel="stylesheet" href="../common.css">
+</head>
+<body data-base="../"><div class="wrap">
+<header>
+  <a class="tab" href="../#tab=worlds" style="text-decoration:none" id="back"></a>
+  <div style="min-width:0"><h1 id="title">…</h1><div class="sub" id="sub"></div></div>
+  <div class="spacer"></div>
+  <span id="hbtn"></span>
+</header>
+<div id="view" style="margin-top:16px"></div>
+<footer id="foot"></footer>
+</div>
+<script src="../common.js"></script>
+<script>
+const {$,el,esc,pct,t,tx}=LP;
+const ROLES=['top','jng','mid','bot','sup'];
+const RN={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Support'};
+const S={W:null,slug:'',ev:null,details:null,win:null,es:[],winAt:0};
+const ea=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+const cur=()=>S.W&&S.W.matches.find(m=>m.slug===S.slug);
+
+async function boot(){
+  $('#hbtn').append(LP.langBtn(),' ',LP.themeBtn());
+  S.slug=decodeURIComponent(location.hash.slice(1));
+  window.addEventListener('hashchange',()=>{S.slug=decodeURIComponent(location.hash.slice(1));S.details=null;S.win=null;pollAll()});
+  document.addEventListener('lp:lang',render);
+  try{S.W=await LP.json('worlds',true)}catch(e){$('#view').innerHTML='<div class="err">worlds.json indisponible</div>';return}
+  render();pollAll();
+  setInterval(async()=>{try{const l=await LP.json('live',true);if(l.version!==S.W.generated){S.W=await LP.json('worlds',true);render()}}catch(e){}},60000);
+  setInterval(pollEs,20000);setInterval(pollLive,10000);setInterval(countdown,1000);
+}
+async function pollEs(){const m=cur();if(!m)return;
+  try{S.es=await LP.esSchedule();const ev=LP.findEvent(m,S.es);S.ev=ev;
+    if(ev&&(ev.state==='inProgress'||(ev.state==='completed'&&!S.details))){S.details=await LP.esDetails(ev.match.id)}
+    renderTop();renderLiveBlock()}catch(e){}}
+async function pollLive(){const m=cur();if(!m||!S.ev||S.ev.state!=='inProgress')return;
+  try{S.details=await LP.esDetails(S.ev.match.id);
+    const g=(S.details.match.games||[]).find(x=>x.state==='inProgress');
+    if(g){const w=await LP.liveWindow(g.id);if(w){S.win={game:g,w};S.winAt=Date.now()}}
+    renderLiveBlock()}catch(e){}}
+async function pollAll(){await pollEs();pollLive()}
+
+function render(){
+  const m=cur(),v=$('#view');$('#back').textContent='← '+t('Tous les matchs','All matches');
+  $('#foot').textContent=t('Probabilités avant draft calibrées en walk-forward ; draft = ajustement faible. Flux live : API lolesports (rafraîchi toutes les 10–20 s). Analyse esport, pas un conseil de pari.','Pre-draft probabilities are walk-forward calibrated; draft is a small adjustment. Live feed: lolesports API (refreshed every 10–20 s). Esports analysis, not betting advice.');
+  if(!m){v.innerHTML=`<div class="err">${t('Match introuvable','Match not found')} : ${esc(S.slug)}</div>`;return}
+  v.innerHTML='';
+  v.append(el('div',null,'<div id="top"></div>'));v.append(el('div',null,'<div id="liveblock"></div>'));
+  if(m.pred){
+    v.append(probPanel(m));
+    if(m.stakes)v.append(stakesPanel(m));
+    if(m.games&&m.games.length)v.append(gamesPanel(m));
+    v.append(contestedPanel(m));
+    v.append(draftOutlook(m));
+    v.append(identityPanel(m));
+    v.append(duelsPanel(m));
+    v.append(formPanel(m));
+  }else{
+    v.append(el('div','panel',`<div class="pbody">${t('Les équipes de ce match ne sont pas encore connues (ou hors modèle). La page se complétera automatiquement dès que le tableau est fixé.','The teams for this match aren\'t known yet (or are outside the model). The page fills in automatically once the bracket is set.')}</div>`));
+    if(m.games&&m.games.length)v.append(gamesPanel(m));
+  }
+  renderTop();renderLiveBlock();LP.hydrate(v);countdown();
+}
+function status(){
+  const m=cur();let st=m.status==='completed'?'completed':'unstarted',s1=m.s1,s2=m.s2;
+  if(S.ev){st=S.ev.state;const ts=S.ev.match.teams,n1=(m.t1||'').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,4);
+    const f=ts[1]&&ts[1].name.toLowerCase().replace(/[^a-z0-9]/g,'').startsWith(n1)&&!ts[0].name.toLowerCase().replace(/[^a-z0-9]/g,'').startsWith(n1);
+    const w=ts.map(x=>x.result?x.result.gameWins:null);if(w[0]!=null){s1=f?w[1]:w[0];s2=f?w[0]:w[1]}}
+  return {st,s1,s2};
+}
+function renderTop(){
+  const m=cur();if(!m)return;const top=$('#top');if(!top)return;const {st,s1,s2}=status(),ts=LP.utc(m.date);
+  const known=m.t1&&m.t2;
+  document.title=(known?`${m.t1} vs ${m.t2}`:'Match')+' — Worlds 2026';
+  $('#title').textContent=known?`${m.t1} vs ${m.t2}`:t('Match à déterminer','Match TBD');
+  $('#sub').textContent=`Worlds 2026 · ${m.stage==='Play-In'?'Play-In':'Swiss / Main Event'} · ${m.round||''} · Bo${m.bo}`;
+  const chip=st==='inProgress'?'<span class="chip live">● LIVE</span>':st==='completed'?`<span class="chip done">${t('Terminé','Final')}</span>`:`<span class="chip up">${LP.fmtDay(ts)} · ${LP.fmtTime(ts)}</span>`;
+  const p=m.pred;
+  const A=m.t1,B=m.t2;
+  top.innerHTML=`<div class="panel"><div class="hero">
+    <div style="flex:1;min-width:140px;text-align:right"><div class="big ${st==='completed'&&Number(s1)<Number(s2)?'muted':''}">${esc(A||'TBD')}</div></div>
+    <div style="text-align:center"><div class="big" style="font-variant-numeric:tabular-nums">${s1==null?'–':s1} : ${s2==null?'–':s2}</div><div>${chip}</div><div class="muted" style="font-size:11px" id="cd"></div></div>
+    <div style="flex:1;min-width:140px"><div class="big ${st==='completed'&&Number(s2)<Number(s1)?'muted':''}">${esc(B||'TBD')}</div></div>
+    ${p?`<div style="flex-basis:100%"><div class="wpbar" style="margin:6px 0 0"><span style="width:${p.series*100}%"></span></div><div class="ft" style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px"><b>${pct(p.series,1)}</b><span class="muted">${t('probabilité de gagner la série (avant draft)','series win probability (pre-draft)')}</span><b>${pct(1-p.series,1)}</b></div></div>`:''}
+    ${m.stream?`<div style="flex-basis:100%;text-align:center"><a href="${ea(m.stream)}" target="_blank" rel="noopener">▶ ${t('Regarder le match','Watch the match')}</a></div>`:''}
+  </div></div>`;
+}
+function countdown(){const m=cur(),c=$('#cd');if(!m||!c)return;const {st}=status();if(st!=='unstarted'){c.textContent='';return}
+  const d=LP.utc(m.date)-Date.now();if(d<=0){c.textContent=t('Début imminent','Starting soon');return}
+  const h=Math.floor(d/3.6e6),mi=Math.floor(d%3.6e6/6e4),s=Math.floor(d%6e4/1e3);c.textContent=t('Début dans ','Starts in ')+(h?h+'h ':'')+String(mi).padStart(2,'0')+'m '+String(s).padStart(2,'0')+'s'}
+
+// ---------- bloc live (API lolesports) ----------
+function renderLiveBlock(){
+  const b=$('#liveblock');if(!b)return;const m=cur();if(!m)return;
+  if(!S.ev||S.ev.state!=='inProgress'||!S.win){b.innerHTML=S.ev&&S.ev.state==='inProgress'?`<div class="panel"><div class="phead"><h3><span class="livedot hot"></span>${t('En direct','Live')}</h3></div><div class="pbody muted">${t('Draft / chargement du game en cours… les données de jeu apparaissent ~1 min après le début (délai officiel du flux).','Draft / game loading… in-game data appears ~1 min after the start (official feed delay).')}</div></div>`:'';return}
+  const {game,w}=S.win,f=w.frames[w.frames.length-1],md=w.gameMetadata;
+  const bt=md.blueTeamMetadata,rt=md.redTeamMetadata;
+  const teamName=id=>{const x=(S.ev.match.teams||[]).find(y=>y.id===id);return x?x.name:'?'};
+  const nB=teamName(bt.esportsTeamId),nR=teamName(rt.esportsTeamId);
+  const gd=f.blueTeam.totalGold-f.redTeam.totalGold;
+  const rowsFor=(meta,fr)=>meta.participantMetadata.map(p=>{const s=fr.participants.find(x=>x.participantId===p.participantId)||{};
+    const nm=LP.champName(p.championId);
+    return `<div class="plrow">${LP.champ(nm,{noname:true})}<span><b>${esc(p.summonerName)}</b> <span class="muted">${esc(nm)} · ${t('niv.','lv.')} ${s.level||'?'}</span></span><span class="kda">${s.kills}/${s.deaths}/${s.assists} · ${s.creepScore||0} CS · ${((s.totalGold||0)/1000).toFixed(1)}k</span></div>`}).join('');
+  const dr=a=>(a||[]).length;
+  b.innerHTML=`<div class="panel"><div class="phead"><h3><span class="livedot hot"></span>${t('En direct — game','Live — game')} ${game.number}</h3><span class="muted" style="font-size:11px">${t('mis à jour','updated')} ${LP.ago(S.winAt)} · ${f.gameState}</span></div>
+    <div class="pbody">
+      <div class="glive"><div class="tm bluet">${esc(nB)}</div><div class="st">${f.blueTeam.totalKills} – ${f.redTeam.totalKills}</div><div class="tm redt" style="text-align:right">${esc(nR)}</div></div>
+      <div class="kv" style="justify-content:center;margin:10px 0">
+        <div><div class="k">${t('Écart d\'or','Gold lead')}</div><div class="v ${gd>=0?'bluet':'redt'}">${gd>=0?nB:nR} +${(Math.abs(gd)/1000).toFixed(1)}k</div></div>
+        <div><div class="k">${t('Tours','Towers')}</div><div class="v">${f.blueTeam.towers} – ${f.redTeam.towers}</div></div>
+        <div><div class="k">${t('Dragons','Dragons')}</div><div class="v">${dr(f.blueTeam.dragons)} – ${dr(f.redTeam.dragons)}</div></div>
+        <div><div class="k">Barons</div><div class="v">${f.blueTeam.barons} – ${f.redTeam.barons}</div></div>
+      </div>
+      <div class="pl"><div>${rowsFor(bt,f.blueTeam)}</div><div>${rowsFor(rt,f.redTeam)}</div></div>
+    </div></div>`;
+  LP.hydrate(b);
+}
+
+// ---------- probas ----------
+function probPanel(m){
+  const p=m.pred,A=m.t1,B=m.t2;
+  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Probabilités du modèle','Model probabilities')}</h3><span class="muted" style="font-size:11px">${t('avant draft · validé en walk-forward','pre-draft · walk-forward validated')}</span></div>`;
+  const b=el('div','pbody');
+  b.innerHTML=`<div class="two"><div>
+      <div class="kv"><div><div class="k">${t('Série','Series')} Bo${m.bo}</div><div class="v">${esc(A)} ${pct(p.series,1)}</div></div><div><div class="k">${t('Un game','Single game')}</div><div class="v">${pct(p.game,1)}</div></div></div>
+      <div class="muted" style="font-size:12px;margin-top:8px">${t('Si','If')} ${esc(A)} ${t('côté bleu','on blue')} : <b>${pct(p.a_blue,1)}</b> · ${t('côté rouge','on red')} : <b>${pct(p.a_red,1)}</b></div>
+      ${p.adj&&(p.adj.a||p.adj.b)?`<div class="muted" style="font-size:11px;margin-top:6px">${t('Ratings ajustés avec les résultats Worlds déjà joués','Ratings adjusted with Worlds results already played')} (${esc(A)} ${p.adj.a>=0?'+':''}${p.adj.a}, ${esc(B)} ${p.adj.b>=0?'+':''}${p.adj.b} logit).</div>`:''}
+      <div class="muted" style="font-size:12px;margin-top:8px">${t('Confrontations directes depuis 2025','Head-to-head since 2025')} : ${p.h2h.games?`<b>${p.h2h.a_wins}-${p.h2h.games-p.h2h.a_wins}</b> ${t('pour','for')} ${esc(A)}`:t('aucune','none')}</div>
+    </div><div>`+
+    p.factors.map(f=>{const pts=f.pts;return `<div class="cmp"><div class="l"><b>${esc(f.a==null?'–':f.a)}</b></div><div class="m">${esc(tx(f.t))}${pts!=null?`<div class="${pts>=0?'bluet':'redt'}" style="font-weight:700">${pts>=0?'+':''}${pts} pts ${pts>=0?'→ '+esc(A):'→ '+esc(B)}</div>`:''}</div><div><b>${esc(f.b==null?'–':f.b)}</b></div></div>`}).join('')+
+    `</div></div>`;
+  pn.append(b);return pn;
+}
+function stakesPanel(m){
+  const s=m.stakes,pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Enjeux — Swiss Stage','Stakes — Swiss Stage')}</h3></div>`;
+  const b=el('div','pbody'),A=m.t1,B=m.t2,i=s.if||{};
+  const row=(team,rec,now,win,lose)=>`<tr><td><b>${esc(team)}</b></td><td class="num">${rec}</td><td class="num">${pct(now)}</td><td class="num ok">${win!=null?pct(win):'–'}</td><td class="num no">${lose!=null?pct(lose):'–'}</td><td class="num"><b>${win!=null&&lose!=null?'±'+Math.round((win-lose)*100)+' pts':''}</b></td></tr>`;
+  b.append(tableEl([[t('Équipe','Team')],[t('Bilan','Record'),'num'],[t('Qualif. avant','Qualif. now'),'num'],[t('Si victoire','If win'),'num'],[t('Si défaite','If loss'),'num'],[t('Enjeu','Swing'),'num']],
+    [rowEl(row(A,s.records.a,s.qual_now.a,i.a_win&&i.a_win.a,i.b_win&&i.b_win.a)),rowEl(row(B,s.records.b,s.qual_now.b,i.b_win&&i.b_win.b,i.a_win&&i.a_win.b))]));
+  const wa=+s.records.a.split('-')[0],la=+s.records.a.split('-')[1],wb=+s.records.b.split('-')[0],lb=+s.records.b.split('-')[1];
+  let msg=t('Match de placement : chaque victoire rapproche des 3 victoires (top 8), chaque défaite des 3 défaites (élimination).','Seeding match: each win moves a team toward 3 wins (top 8), each loss toward 3 losses (elimination).');
+  if(wa===2||wb===2)msg=t('⚠ Match de qualification : le vainqueur est qualifié pour les quarts de finale (top 8).','⚠ Qualification match: the winner is through to the quarterfinals (top 8).');
+  if(la===2||lb===2)msg=(wa===2||wb===2?'':'')+t('☠ Match d\'élimination : le perdant est éliminé du tournoi.','☠ Elimination match: the loser is out of the tournament.')+((wa===2||wb===2)?' '+t('(et le vainqueur se qualifie)','(and the winner qualifies)'):'');
+  b.append(el('div','note',msg+' '+t('Chances calculées par simulation Monte-Carlo du reste du Swiss.','Odds from a Monte-Carlo simulation of the rest of the Swiss.')));
+  pn.append(b);return pn;
+}
+function rowEl(html){const t_=document.createElement('table');t_.innerHTML='<tbody>'+html+'</tbody>';return t_.querySelector('tr')}
+function tableEl(head,rows){const s=el('div','scroll'),tb=el('table');
+  tb.innerHTML='<thead><tr>'+head.map(h=>`<th class="${h[1]||''}">${h[0]}</th>`).join('')+'</tr></thead>';
+  const bd=el('tbody');rows.forEach(r=>bd.append(r));tb.append(bd);s.append(tb);return s}
+
+// ---------- games joués ----------
+function gamesPanel(m){
+  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Games joués — drafts et résultats','Games played — drafts & results')}</h3></div>`;
+  const b=el('div','pbody');
+  m.games.forEach(g=>{
+    const w=g.blue_win?g.blue:g.red,mins=g.length?Math.floor(g.length/60)+':'+String(g.length%60).padStart(2,'0'):'';
+    const dr=(picks,players,cls)=>`<div class="draftrow">${picks.map((c,i)=>`<div class="pk"><div class="muted" style="font-size:10px">${RN[ROLES[i]]}</div>${LP.champ(c,{lg:1,noname:1})}<div><b>${esc(c)}</b></div><div class="muted">${esc(players[i]||'')}</div></div>`).join('')}</div>`;
+    const bans=a=>a.map(c=>LP.champ(c,{ban:1,noname:1})).join(' ');
+    const p=g.p;
+    const d=el('div');d.style.cssText='margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--line)';
+    d.innerHTML=`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><b>Game ${g.n}</b><span class="chip fav">${esc(w)} ${t('gagne','wins')}</span><span class="muted">${mins} · ${g.kills[0]}-${g.kills[1]} kills · ${t('or','gold')} ${(g.gold[0]/1000).toFixed(1)}k/${(g.gold[1]/1000).toFixed(1)}k · ${t('tours','towers')} ${g.towers[0]}-${g.towers[1]} · drag ${g.dragons[0]}-${g.dragons[1]} · baron ${g.barons[0]}-${g.barons[1]}</span>${g.vod?`<a href="${ea(g.vod)}" target="_blank" rel="noopener">VOD ▶</a>`:''}</div>
+      <div class="two"><div><div class="bluet"><b>${esc(g.blue)}</b> <span class="muted">(${t('bleu','blue')})</span></div>${dr(g.blue_picks,g.blue_players)}<div class="muted" style="font-size:11px">Bans ${bans(g.blue_bans)}</div></div>
+      <div><div class="redt"><b>${esc(g.red)}</b> <span class="muted">(${t('rouge','red')})</span></div>${dr(g.red_picks,g.red_players)}<div class="muted" style="font-size:11px">Bans ${bans(g.red_bans)}</div></div></div>
+      ${p?`<div class="muted" style="font-size:12px;margin-top:6px">${t('Modèle','Model')} : ${esc(g.blue)} ${pct(p.pre,1)} ${t('avant draft','pre-draft')} → <b>${pct(p.post,1)}</b> ${t('après draft','post-draft')} (${t('avantage de draft','draft edge')} <b class="${g.draft_edge>=0?'bluet':'redt'}">${g.draft_edge>=0?'+':''}${g.draft_edge.toFixed(2)}</b> ${g.draft_edge>=0?t('bleu','blue'):t('rouge','red')}) ${g.draft_top&&g.draft_top[0]?` · ${t('pick clé','key pick')} : ${esc(g.draft_top[0].champion)} (${g.draft_top[0].side==='blue'?t('bleu','blue'):t('rouge','red')})`:''}</div>`:''}`;
+    b.append(d)});
+  pn.append(b);return pn;
+}
+
+// ---------- champions contestés ----------
+function contestedPanel(m){
+  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Champions contestés','Contested champions')}</h3><span class="muted" style="font-size:11px">${t('présence = % des games où le champion est pick ou ban (équipes + meta Worlds)','presence = % of games where the champion is picked or banned (teams + Worlds meta)')}</span></div>`;
+  const A=m.t1,B=m.t2;
+  const cell=(x,key)=>{const r=x[key];const pk=r.picks?`<b>${r.picks}</b>p${r.picks>=2?` · ${pct(r.wins/r.picks)}`:''}`:'<span class="muted">0p</span>';
+    return `${pk} · <b>${r.bans}</b>b <span class="muted">(${r.banned_vs} ${t('subis','vs')})</span>${r.player?`<div class="muted" style="font-size:10px">${esc(r.player)}${r.role?' · '+RN[r.role]:''}</div>`:''}`};
+  pn.append(tableEl([['#','rk'],['Champion'],[t('Présence','Presence'),'num'],[esc(A)],[esc(B)],['Worlds','num'],[t('Verdict','Verdict')]],
+    m.contested.slice(0,14).map((x,i)=>{const tr=el('tr');
+      const tag=x.both?`<span class="pill" style="color:var(--warn);border-color:var(--warn)">${t('contesté par les deux','contested by both')}</span>`:
+        (x.a.inv>=x.b.inv?`<span class="pill">${t('priorité','priority')} ${esc(A)}`:`<span class="pill">${t('priorité','priority')} ${esc(B)}`)+'</span>';
+      tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(x.champion)}</td><td class="num"><b>${pct(x.presence)}</b></td><td>${cell(x,'a')}</td><td>${cell(x,'b')}</td><td class="num muted">${pct(x.worlds)}</td><td>${tag}</td>`;return tr})));
+  pn.append(el('div','note',t('Colonnes équipes : p = picks (et win% quand ≥2), b = bans faits, « subis » = bans reçus quand l\'équipe joue. Fenêtre : depuis le 1er mars 2026, pondérée vers le récent.','Team columns: p = picks (win% when ≥2), b = bans made, “vs” = bans received when the team plays. Window: since 2026-03-01, recency-weighted.')));
+  return pn;
+}
+function draftOutlook(m){
+  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Draft attendue — bans et picks probables','Expected draft — likely bans & picks')}</h3></div>`;
+  const b=el('div','pbody'),A=m.t1,B=m.t2;
+  const chips=(arr)=>arr.map(x=>`<span style="display:inline-flex;margin:3px 10px 3px 0;align-items:center;gap:6px">${LP.champ(x.champion,{ban:1})}<b>${pct(x.p)}</b></span>`).join('');
+  b.innerHTML=`<div class="two"><div><div class="sec" style="margin-top:0">${t('Bans probables de','Likely bans by')} ${esc(A)}</div>${chips(m.likely_bans.a)}</div><div><div class="sec" style="margin-top:0">${t('Bans probables de','Likely bans by')} ${esc(B)}</div>${chips(m.likely_bans.b)}</div></div>`;
+  const rows=ROLES.map(ro=>{const a=m.likely_picks.a[ro],bb=m.likely_picks.b[ro];
+    const f=x=>`<div><b>${esc(x.player||'?')}</b> <span class="muted" style="font-size:10px">${x.unique} ${t('champs','champs')}</span></div><div>`+x.pool.slice(0,3).map(c=>`<span style="display:inline-flex;margin:2px 8px 2px 0;gap:5px;align-items:center">${LP.champ(c.champion)}<span class="muted">${pct(c.w)}${c.games>=3?' · '+pct(c.wins/c.games)+' WR':''}</span></span>`).join('')+'</div>';
+    const tr=el('tr');tr.innerHTML=`<td><span class="tag">${RN[ro]}</span></td><td style="white-space:normal">${f(a)}</td><td style="white-space:normal">${f(bb)}</td>`;return tr});
+  b.append(el('div','sec',t('Picks probables par rôle (pool récent du joueur)','Likely picks by role (player\'s recent pool)')));
+  b.append(tableEl([[t('Rôle','Role')],[esc(A)],[esc(B)]],rows));
+  b.append(el('div','note',t('Bans = habitudes de l\'équipe + picks signature de l\'adversaire (somme normalisée à 5 bans). Picks = part des games récentes du joueur sur ce champion (en pourcentage de ses picks, pondéré vers le récent) ; ce que la draft adverse (bans, counters) peut changer n\'est pas modélisé.','Bans = team habits + the opponent\'s signature picks (normalized to 5 bans). Picks = share of the player\'s recent games on that champion (recency-weighted); how the opposing draft (bans, counters) shifts this is not modeled.')));
+  pn.append(b);return pn;
+}
+
+// ---------- identité de jeu ----------
+function cmp(label,a,b,fmt,hi=true,maxv){
+  if(a==null||b==null)return '';const mx=maxv||Math.max(a,b,1e-9)*1.25,aw=a/(a+b||1)*100;
+  const wa=hi?a>b:a<b,wb=hi?b>a:b<a;
+  return `<div class="cmp"><div class="l"><b class="${wa?'win':''}">${fmt(a)}</b></div><div class="m">${label}<div class="hb"><div class="a" style="width:${aw}%"></div><div class="b" style="width:${100-aw}%"></div></div></div><div><b class="${wb?'win':''}">${fmt(b)}</b></div></div>`;
+}
+function identityPanel(m){
+  const W=S.W,A=m.t1,B=m.t2,PA=W.profiles[A],PB=W.profiles[B];
+  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Comment chaque équipe veut jouer','How each team wants to play')}</h3><span class="muted" style="font-size:11px">${t('depuis','since')} ${esc(PA?PA.since:'')} · ${t('comparé aux 16+ équipes de Worlds','compared with the Worlds field')}</span></div>`;
+  if(!PA||!PB){pn.append(el('div','pbody muted','–'));return pn}
+  const b=el('div','pbody');
+  const f1=x=>x.toFixed(1),f2=x=>x.toFixed(2),pc=x=>(x*100).toFixed(0)+'%';
+  const wrSide=(P,s)=>P[s+'_g']?P[s+'_w']/P[s+'_g']:null;
+  b.innerHTML=`<div class="two"><div><div class="bluet" style="font-weight:800;margin-bottom:4px">${esc(A)} <span class="muted" style="font-weight:400">${PA.games} games · ${pc(PA.wr)}</span></div><ul class="bul">${PA.bullets.map(u=>`<li>${esc(tx(u.t))}</li>`).join('')||`<li class="muted">${t('Profil proche de la moyenne.','Profile close to the field average.')}</li>`}</ul></div>
+    <div><div class="redt" style="font-weight:800;margin-bottom:4px">${esc(B)} <span class="muted" style="font-weight:400">${PB.games} games · ${pc(PB.wr)}</span></div><ul class="bul">${PB.bullets.map(u=>`<li>${esc(tx(u.t))}</li>`).join('')||`<li class="muted">${t('Profil proche de la moyenne.','Profile close to the field average.')}</li>`}</ul></div></div>
+    <div class="sec">${t('Face à face des styles','Style head-to-head')}</div>`+
+    cmp(t('Win% global','Overall win%'),PA.wr,PB.wr,pc)+
+    cmp(t('Win% côté bleu','Blue-side win%'),wrSide(PA,'blue'),wrSide(PB,'blue'),pc)+
+    cmp(t('Win% côté rouge','Red-side win%'),wrSide(PA,'red'),wrSide(PB,'red'),pc)+
+    cmp(t('Durée moy. (min)','Avg length (min)'),PA.len,PB.len,f1,false)+
+    cmp(t('Kills / min (total)','Kills / min (total)'),PA.kpm,PB.kpm,f2)+
+    cmp(t('Dragons / game','Dragons / game'),PA.dragons,PB.dragons,f2)+
+    cmp(t('Hérauts / game','Heralds / game'),PA.heralds,PB.heralds,f2)+
+    cmp(t('Barons / game','Barons / game'),PA.barons,PB.barons,f2)+
+    cmp(t('Tours / game','Towers / game'),PA.towers,PB.towers,f1)+
+    cmp(t('Part de l\'or','Gold share'),PA.gold_share,PB.gold_share,x=>(x*100).toFixed(1)+'%')+
+    cmp(t('Win% parties <30 min','Win% games <30 min'),PA.short.g?PA.short.w/PA.short.g:null,PB.short.g?PB.short.w/PB.short.g:null,pc)+
+    cmp(t('Win% parties >34 min','Win% games >34 min'),PA.long.g?PA.long.w/PA.long.g:null,PB.long.g?PB.long.w/PB.long.g:null,pc)+
+    (PA.style&&PB.style?cmp(t('Engage / all-in (compos)','Engage / all-in (comps)'),PA.style.allin,PB.style.allin,f2)+cmp(t('Poke / contrôle','Poke / control'),PA.style.poke,PB.style.poke,f2)+cmp(t('Scaling / hypercarry','Scaling / hypercarry'),PA.style.hyper,PB.style.hyper,f2)+cmp(t('Mobilité moyenne','Avg mobility'),PA.style.mob,PB.style.mob,f2):'');
+  const bansBlock=(P)=>`<div class="muted" style="font-size:12px">${t('Bans habituels (phase 1)','Usual bans (phase 1)')} : ${P.bans_p1.slice(0,5).map(x=>`${LP.champ(x.champion,{ban:1})} <span class="muted">${pct(x.rate)}</span>`).join(' · ')}</div><div class="muted" style="font-size:12px;margin-top:4px">${t('Les adversaires les bannissent','Opponents ban them')} : ${P.bans_against.slice(0,5).map(x=>`${LP.champ(x.champion,{ban:1})} <span class="muted">${pct(x.rate)}</span>`).join(' · ')}</div>`;
+  b.append(el('div','sec',t('Habitudes de bans','Ban habits')));
+  const tw=el('div','two');tw.innerHTML=`<div><b class="bluet">${esc(A)}</b>${bansBlock(PA)}</div><div><b class="redt">${esc(B)}</b>${bansBlock(PB)}</div>`;b.append(tw);
+  pn.append(b);return pn;
+}
+function duelsPanel(m){
+  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Duels de rôles','Role matchups')}</h3></div>`;
+  const A=m.t1,B=m.t2;
+  const rows=(m.duels||[]).map(d=>{const tr=el('tr');
+    const cl=(x,y)=>x>y?'ok':'';
+    tr.innerHTML=`<td><span class="tag">${RN[d.role]}</span></td>
+      <td><b class="lnk" data-x>${esc(d.a.player)}</b></td><td class="rtg num">${d.a.rating.toFixed(1)}</td><td class="num ${cl(d.a.kda,d.b.kda)}">${d.a.kda}</td><td class="num ${cl(d.a.kp,d.b.kp)}">${pct(d.a.kp)}</td><td class="num ${cl(d.a.gd15,d.b.gd15)}">${d.a.gd15>0?'+':''}${d.a.gd15}</td>
+      <td class="num"><b class="${d.edge>=0?'bluet':'redt'}">${d.edge>=0?'+':''}${d.edge.toFixed(1)}</b></td>
+      <td><b>${esc(d.b.player)}</b></td><td class="rtg num">${d.b.rating.toFixed(1)}</td><td class="num ${cl(d.b.kda,d.a.kda)}">${d.b.kda}</td><td class="num ${cl(d.b.kp,d.a.kp)}">${pct(d.b.kp)}</td><td class="num ${cl(d.b.gd15,d.a.gd15)}">${d.b.gd15>0?'+':''}${d.b.gd15}</td>`;return tr});
+  pn.append(tableEl([[t('Rôle','Role')],[esc(A)],['Rating','num'],['KDA','num'],['KP','num'],['GD@15','num'],[t('Écart','Edge'),'num'],[esc(B)],['Rating','num'],['KDA','num'],['KP','num'],['GD@15','num']],rows));
+  pn.append(el('div','note',t('Rating joueur = performance individuelle (GD@15, dégâts, KDA, KP) + contexte d\'équipe, réduit pour les petits échantillons.','Player rating = individual performance (GD@15, damage, KDA, KP) + team context, shrunk for small samples.')));
+  return pn;
+}
+function formPanel(m){
+  const W=S.W,A=m.t1,B=m.t2,PA=W.profiles[A],PB=W.profiles[B];
+  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Forme récente','Recent form')}</h3></div>`;
+  const col=(team,P)=>`<div><b>${esc(team)}</b><div class="mt">`+(P?`<table><tbody>${P.recent.map(r=>`<tr><td class="muted">${r.date}</td><td class="${r.win?'ok':'no'}"><b>${r.win?'W':'L'}</b></td><td><span class="lnk" onclick="location.href='../#tab=teams'">${esc(r.opp)}</span> <span class="muted" style="font-size:10px">(${r.side==='blue'?t('bleu','blue'):t('rouge','red')})</span></td><td class="muted" style="font-size:11px">${esc(r.tour)}</td></tr>`).join('')}</tbody></table>`:'–')+`</div></div>`;
+  const b=el('div','pbody');b.innerHTML=`<div class="two">${col(A,PA)}${col(B,PB)}</div>`;pn.append(b);return pn;
+}
+boot();
+</script>
+</body></html>

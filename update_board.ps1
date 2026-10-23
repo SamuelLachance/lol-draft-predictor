@@ -4,12 +4,16 @@
 # (3) rebuilds all ratings, (4) deploys to gh-pages, (5) updates the shared Release
 # so the cloud CI stays in sync. Schedule it once (see the schtasks line at the bottom).
 $ErrorActionPreference = "Continue"
-Set-Location "C:\Users\Admin\Documents\lolcoach\draftwork"
+Set-Location $PSScriptRoot
 
 Write-Host "[1/4] Refreshing snapshot from the HuggingFace OE mirror + updating the Release..."
 python ml/fetch_hf.py --upload               # reliable source (no Drive quota)
 # Optional: also try the official Drive for the very latest games (works from a residential IP when quota allows)
 python ml/refresh_snapshot.py --upload 2>$null
+
+Write-Host "[1b/4] Refreshing enriched games (picks/bans/objectives) + Worlds schedule..."
+python ml/fetch_rich.py
+gh release upload board-data data/games_rich.parquet --clobber
 
 Write-Host "[2/4] Preparing build input..."
 New-Item -ItemType Directory -Force data/processed | Out-Null
@@ -19,6 +23,7 @@ Write-Host "[3/4] Rebuilding ratings..."
 python ml/build_drafts.py
 python ml/build_drafts_team.py
 python ml/build_board.py
+python ml/build_worlds.py
 
 Write-Host "[4/4] Deploying to gh-pages..."
 Push-Location web/public

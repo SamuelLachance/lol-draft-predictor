@@ -1,0 +1,67 @@
+name: Live Worlds update
+
+# Rafraichit pages de match / classement Swiss / probas toutes les ~10 min pendant les Worlds.
+# Leger (~1 min) : ne reconstruit PAS les ratings (c'est le job quotidien) ; il relit Leaguepedia
+# (resultats + drafts), applique l'ajustement de rating "en tournoi" et republie worlds.json + live.json.
+# Le navigateur, lui, lit en plus l'API lolesports directement (scores/live game toutes les 10-30 s).
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # on part du site DEJA publie (ratings du dernier build quotidien)
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: site
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install --quiet pandas numpy pyarrow scikit-learn
+
+      # si l'asset n'existe pas encore (avant le 1er run quotidien), fetch_rich fait le backfill (~3 min)
+      - name: Download enriched games (best-effort)
+        run: gh release download board-data --pattern games_rich.parquet -D data --clobber || true
+
+      - name: Incremental fetch (3 last days) + schedule
+        run: |
+          python ml/fetch_rich.py
+          gh release upload board-data data/games_rich.parquet --clobber || true
+
+      - name: Build Worlds pages data from the published ratings
+        run: |
+          mkdir -p web/public/data web/public/model
+          cp site/data/teams.json site/data/players.json site/data/meta.json web/public/data/
+          cp site/model/draft_v2.json web/public/model/
+          python ml/build_worlds.py
+
+      - name: Publish worlds.json + live.json
+        run: |
+          cp web/public/data/worlds.json web/public/data/live.json site/data/
+          cd site
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/worlds.json data/live.json
+          if git diff --cached --quiet; then echo "no change"; else
+            git commit -q -m "Live Worlds update $(date -u +%FT%TZ)"
+            git push -q origin gh-pages
+          fi
