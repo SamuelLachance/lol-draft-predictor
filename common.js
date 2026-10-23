@@ -31,7 +31,8 @@
   LP.json = async (f, bust) => {
     const r = await fetch(base + 'data/' + f + '.json' + (bust ? '?t=' + Date.now() : ''), { cache: bust ? 'no-store' : 'default' });
     if (!r.ok) throw new Error(f + ' ' + r.status);
-    return r.json();
+    const txt = await r.text();
+    try { return JSON.parse(txt) } catch (e) { return JSON.parse(txt.replace(/:NaN\b/g, ':null').replace(/,NaN\b/g, ',null').replace(/\[NaN\b/g, '[null').replace(/-?Infinity\b/g, 'null')) }   // filet de securite : NaN invalide en JSON
   };
 
   // ---------- icones champions ----------
