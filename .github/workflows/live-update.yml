@@ -1,25 +1,39 @@
 name: Live Worlds update
 
 # Rafraichit pages de match / classement Swiss / probas toutes les ~10 min pendant les Worlds.
-# Leger (~1 min) : ne reconstruit PAS les ratings (c'est le job quotidien) ; il relit Leaguepedia
-# (resultats + drafts), applique l'ajustement de rating "en tournoi" et republie worlds.json + live.json.
-# Le navigateur, lui, lit en plus l'API lolesports directement (scores/live game toutes les 10-30 s).
+#
+# Declenchement, par ordre de fiabilite :
+#   1. push sur ce fichier (ou sur LIVE_TRIGGER) : demarre la chaine immediatement ;
+#   2. CHAINE : a la fin de chaque execution, le job "next" attend ~8 min puis relance ce workflow (workflow_dispatch avec
+#      le GITHUB_TOKEN, autorise) -> un cycle d'environ 10 min, independant du cron de GitHub ;
+#   3. cron */10 : simple filet de securite (GitHub le retarde / saute souvent), il relance la chaine si elle s'est rompue ;
+#   4. lancement manuel (onglet Actions -> Run workflow).
+# La chaine s'arrete d'elle-meme apres le 15/11/2026 (fin des Worlds).
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/live-update.yml'
+      - 'LIVE_TRIGGER'
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch: {}
 
 permissions:
   contents: write
+  actions: write
 
-concurrency:
-  group: site-deploy
-  cancel-in-progress: false
+env:
+  END_DATE: '2026-11-16'
 
 jobs:
-  live:
+  update:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    # jamais deux deploiements simultanes (partage avec le job quotidien) ; seul ce job est verrouille, pas l'attente de "next"
+    concurrency:
+      group: site-deploy
+      cancel-in-progress: false
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -38,8 +52,7 @@ jobs:
       - name: Install dependencies
         run: pip install --quiet pandas numpy pyarrow scikit-learn scipy
 
-      # si l'asset n'existe pas encore (avant le 1er run quotidien), fetch_rich fait le backfill (~3 min)
-      # snapshot des games (ratings) : ajoute les games du jour puis REFIT rapide du modele de force d'equipe (~15 s)
+      # snapshot des games (ratings) : ajoute les games du jour puis REFIT rapide du modele de force d'equipe (~40 s)
       - name: Download rating snapshot
         run: gh release download board-data --pattern board_input.parquet -D data --clobber
 
@@ -47,6 +60,7 @@ jobs:
         run: python ml/fetch_leaguepedia.py
         continue-on-error: true
 
+      # si l'asset n'existe pas encore (avant le 1er run quotidien), fetch_rich fait le backfill (~3 min)
       - name: Download enriched games (best-effort)
         run: gh release download board-data --pattern games_rich.parquet -D data --clobber || true
 
@@ -72,5 +86,26 @@ jobs:
           git add data/worlds.json data/live.json data/teams.json data/regions.json data/meta.json data/h2h.json
           if git diff --cached --quiet; then echo "no change"; else
             git commit -q -m "Live Worlds update $(date -u +%FT%TZ)"
+            git pull -q --rebase origin gh-pages || true
             git push -q origin gh-pages
           fi
+
+  # relance la chaine meme si "update" a echoue ; ne bloque PAS le groupe de concurrence pendant l'attente
+  next:
+    needs: update
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Wait, then trigger the next cycle
+        run: |
+          if [ "$(date -u +%s)" -ge "$(date -ud "$END_DATE" +%s)" ]; then echo "fin des Worlds : la chaine s'arrete"; exit 0; fi
+          # declenchement par le cron : on ne (re)lance la chaine que si aucune autre execution n'a eu lieu depuis 15 min (sinon elle tourne deja)
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            recent=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow live-update.yml --limit 10 --json databaseId,createdAt               --jq "[.[] | select(.databaseId != $GITHUB_RUN_ID) | select((now - (.createdAt | fromdateiso8601)) < 900)] | length")
+            if [ "${recent:-0}" -gt 0 ]; then echo "chaine deja active"; exit 0; fi
+          fi
+          sleep 480
+          gh workflow run live-update.yml --repo "$GITHUB_REPOSITORY" --ref main
