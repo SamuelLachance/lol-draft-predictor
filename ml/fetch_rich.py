@@ -99,6 +99,7 @@ def main() -> int:
     ap.add_argument("--since", default=None)
     ap.add_argument("--schedule-only", action="store_true")
     a = ap.parse_args()
+    RICH.parent.mkdir(parents=True, exist_ok=True)
     sched = fetch_schedule()
     SCHED.write_text(json.dumps(sched, ensure_ascii=False), encoding="utf-8")
     print(f"calendrier Worlds : {len(sched)} matchs")
