@@ -160,9 +160,17 @@ function liveProb(p0,tmin,fb,fr){
 function computeLive(m){
   if(!S.win||!m.t1||!m.t2)return null;
   const {game,w}=S.win,f=w.frames[w.frames.length-1],md=w.gameMetadata,bt=md.blueTeamMetadata,rt=md.redTeamMetadata;
-  const tn=id=>{const x=(S.ev.match.teams||[]).find(y=>y.id===id);return x?x.name:'?'};
-  const nB=tn(bt.esportsTeamId),nR=tn(rt.esportsTeamId);
-  const t1blue=LP.sameTeam(nB,m.t1)||LP.sameTeam(nR,m.t2)?true:LP.sameTeam(nR,m.t1)||LP.sameTeam(nB,m.t2)?false:true;
+  // ids d'equipes de getEventDetails (le calendrier n'a PAS d'id) ; esportsTeamId des metadonnees du flux = memes ids
+  const dt=(S.details&&S.details.match&&S.details.match.teams)||[];
+  const nm=id=>{const x=dt.find(y=>y.id===id);return x?x.name:null};
+  const nB=nm(bt.esportsTeamId),nR=nm(rt.esportsTeamId);
+  const e1=dt.find(x=>LP.sameTeam(x.name,m.t1)),e2=dt.find(x=>LP.sameTeam(x.name,m.t2));
+  // le cote vient des metadonnees du FLUX (seule source fiable : game.teams[].side de getEventDetails est parfois inverse sur des games anciens)
+  let t1blue=null;
+  if(e1)t1blue=e1.id===bt.esportsTeamId?true:e1.id===rt.esportsTeamId?false:null;
+  if(t1blue==null&&e2)t1blue=e2.id===rt.esportsTeamId?true:e2.id===bt.esportsTeamId?false:null;
+  if(t1blue==null&&nB&&nR)t1blue=(LP.sameTeam(nB,m.t1)||LP.sameTeam(nR,m.t2))?true:(LP.sameTeam(nR,m.t1)||LP.sameTeam(nB,m.t2))?false:null;
+  if(t1blue==null)return null;                                                   // cote inconnu : on n'affiche rien plutot qu'une inversion
   const bTeam=t1blue?m.t1:m.t2,rTeam=t1blue?m.t2:m.t1;
   const champs=meta=>ROLES.map((r,i)=>{const p=meta.participantMetadata.find(x=>ROLE_OF[x.role]===r)||meta.participantMetadata[i];return p?LP.champName(p.championId):null});
   const cb=champs(bt),cr=champs(rt),de=draftEval(cb,cr);
