@@ -227,8 +227,34 @@ function players(){
 function champs(){
   const wrap=el('div');
   const W=state.worlds;
-  const srcs=[['worlds','Worlds 2026'],['recent',t('60 derniers jours','Last 60 days')],['hidden',t('💎 Valeur cachée','💎 Hidden value')],['rating',t('Notes par rôle','Role ratings')]];
+  const srcs=[['worlds','Worlds 2026'],['recent',t('60 derniers jours','Last 60 days')],['hidden',t('💎 Valeur cachée','💎 Hidden value')],['syn',t('Synergies & counters','Synergies & counters')],['rating',t('Notes par rôle','Role ratings')]];
   const bar=filterBar(srcs,state.cSrc,k=>{state.cSrc=k;render()});
+  if(state.cSrc==='syn'){
+    const b2=filterBar(srcs,state.cSrc,k=>{state.cSrc=k;render()});
+    const p=panel(t('Synergies & counters (modèle de draft v2, ridge)','Synergies & counters (draft model v2, ridge)'),b2);
+    const dv=state.dv;if(!dv){p.append(el('div','note','…'));wrap.append(p);return wrap}
+    const names=[...new Set(Object.keys(dv.c).map(k=>k.split('|')[1]))].sort((a,b)=>a.localeCompare(b));
+    const cur=state.synChamp&&names.includes(state.synChamp)?state.synChamp:'Ashe';state.synChamp=cur;
+    const sel=el('select');names.forEach(n=>sel.append(new Option(n,n)));sel.value=cur;sel.onchange=()=>{state.synChamp=sel.value;render()};
+    const bar=el('div');bar.style.cssText='padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap';bar.append(el('span','muted',t('Champion :','Champion:')),sel,Object.assign(el('span'),{innerHTML:LP.champ(cur,{lg:1})}));p.append(bar);
+    const sg=v=>(1/(1+Math.exp(-v))-.5)*100,fmt=v=>(v>=0?'+':'')+sg(v).toFixed(1);
+    const syn=[],cnt=[];
+    for(const k in dv.s){const [r1,r2,a,b]=k.split('|');if(a===cur)syn.push({role:r2,partner:b,rs:r1,v:dv.s[k]});else if(b===cur)syn.push({role:r1,partner:a,rs:r2,v:dv.s[k]})}
+    for(const k in dv.m){const [r,lo,hi]=k.split('|');if(lo===cur)cnt.push({role:r,opp:hi,v:dv.m[k]});else if(hi===cur)cnt.push({role:r,opp:lo,v:-dv.m[k]})}
+    const rowS=x=>`<td>${LP.champ(x.partner)}</td><td><span class="tag">${(x.role||'').toUpperCase()}</span></td><td class="num ${x.v>=0?'ok':'no'}"><b>${fmt(x.v)}</b></td>`;
+    const rowC=x=>`<td>${LP.champ(x.opp)}</td><td><span class="tag">${x.role.toUpperCase()}</span></td><td class="num ${x.v>=0?'ok':'no'}"><b>${fmt(x.v)}</b></td>`;
+    const mk=(title,hd,rows,fn)=>{const d=el('div');d.append(el('div','sec',title));const tb=tableEl(hd,rows.map(x=>{const tr=el('tr');tr.innerHTML=fn(x);return tr}));d.append(tb);return d};
+    const g2=el('div','two');g2.style.padding='4px 16px 12px';
+    const bestS=syn.slice().sort((a,b)=>b.v-a.v),bestC=cnt.slice().sort((a,b)=>b.v-a.v);
+    g2.append(mk(t('Meilleures synergies','Best synergies'),[[t('Partenaire','Partner')],[t('Rôle','Role')],[t('Effet (pts)','Effect (pts)'),'num']],bestS.slice(0,8),rowS),
+      mk(t('Pires synergies','Worst synergies'),[[t('Partenaire','Partner')],[t('Rôle','Role')],[t('Effet (pts)','Effect (pts)'),'num']],bestS.slice(-8).reverse(),rowS),
+      mk(t('Counters : ce champion bat bien…','Counters: this champion beats…'),[[t('Adversaire (même rôle)','Opponent (same role)')],[t('Rôle','Role')],[t('Effet pour lui (pts)','Effect for it (pts)'),'num']],bestC.slice(0,8),rowC),
+      mk(t('…et est battu par','…and is beaten by'),[[t('Adversaire (même rôle)','Opponent (same role)')],[t('Rôle','Role')],[t('Effet pour lui (pts)','Effect for it (pts)'),'num']],bestC.slice(-8).reverse(),rowC));
+    p.append(g2);
+    if(!syn.length&&!cnt.length)p.append(el('div','note',t('Aucun effet notable estimé pour ce champion (trop rare ou effets écrasés par le ridge).','No notable estimated effect for this champion (too rare or shrunk by the ridge).')));
+    p.append(el('div','note',t('Effets en points de win% (à force d\'équipe égale), estimés par ridge sur les games récentes (demi-vie 240 j) ; seuls les effets significatifs du modèle sont conservés. Informatif : en test hors échantillon, les synergies et les counters n\'ajoutent rien au-delà de la valeur propre du champion (log-loss −0,0014 avec les champions seuls, −0,0015 avec counters, −0,0011 avec synergies : écarts non significatifs entre eux).','Effects in win% points (at equal team strength), estimated by ridge on recent games (240-day half-life); only the model\'s non-negligible effects are kept. Informational: out-of-sample, synergies and counters add nothing beyond the champion\'s own value (log-loss −0.0014 champions only, −0.0015 with counters, −0.0011 with synergies: differences not significant).')));
+    wrap.append(p);return wrap;
+  }
   if(state.cSrc==='hidden'){
     const roles=[['ALL',t('Tous','All')],...ROLES.map(r=>[r,RN[r]])];
     const b2=filterBar([...srcs.map(x=>x),],state.cSrc,k=>{state.cSrc=k;render()});

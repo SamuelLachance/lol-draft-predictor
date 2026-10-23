@@ -128,6 +128,45 @@ def style_of(champs, attrs):
     return {"allin": allin / n, "poke": poke / n, "hyper": hyper / n, "ad": ad / n, "ap": ap / n, "mob": mob / n, "engage": eng / n, "cc": cc / n, "n": int(n)}
 
 
+THEMES = [("engage", T("Engage / all-in", "Engage / all-in")), ("poke", T("Poke / contrôle", "Poke / control")), ("hyper", T("Scaling / hypercarry", "Scaling / hypercarry"))]
+_TN = {}
+
+
+def theme_vec(champs, attrs):
+    """scores bruts (engage/all-in, poke/controle, scaling/hypercarry) d'une draft — meme scoring que le draft assistant."""
+    al = po = hy = n = 0.0
+    for c in champs:
+        a = attrs.get(c)
+        if not a:
+            continue
+        n += 1
+        al += 2 * a["engage"] + (1.5 if a["family"] in ("engage", "catch") else 0) + (1 if a["family"] == "assassin" else 0) + .5 * a["cc"] * a["engage"] + .5 * a["pick"]
+        po += 1.5 * a["poke"] + a["disengage"] + (1.5 if a["family"] in ("poke", "disengage") else 0) + (.7 if a["family"] == "enchanter" else 0) + .5 * a["anti_dive"] - a["engage"]
+        hy += (3 if a["family"] == "hypercarry" else 0) + (2 if a["family"] == "enchanter" else 0) + .4 * a["scaling"] + .3 * a["waveclear"] + .5 * a["global"]
+    return np.array([al / n, po / n, hy / n]) if n >= 3 else None
+
+
+def theme_norm(g, attrs):
+    if "mu" not in _TN:
+        v = [theme_vec(p_, attrs) for p_ in list(g[g.date >= SINCE].blue_picks)[:3000] + list(g[g.date >= SINCE].red_picks)[:3000]]
+        v = np.array([x for x in v if x is not None]); _TN["mu"] = v.mean(0); _TN["sd"] = v.std(0) + 1e-9
+    return _TN["mu"], _TN["sd"]
+
+
+def theme_profile(rows, g, attrs):
+    """parts de chaque theme, winrate par theme, et FIDELITE = similarite (cosinus) moyenne de chaque draft au theme habituel de l'equipe."""
+    mu, sd = theme_norm(g, attrs)
+    Z = [(theme_vec(r["picks"], attrs), r["win"]) for r in rows]
+    Z = [((z - mu) / sd, w) for z, w in Z if z is not None]
+    if len(Z) < 8:
+        return None
+    M = np.array([z for z, _ in Z]); W = np.array([w for _, w in Z]); th = M.argmax(1); mean = M.mean(0)
+    cos = M @ mean / (np.linalg.norm(M, axis=1) * np.linalg.norm(mean) + 1e-9)
+    return {"n": len(Z), "share": [round(float((th == i).mean()), 3) for i in range(3)],
+            "wr": [round(float(W[th == i].mean()), 3) if (th == i).sum() >= 6 else None for i in range(3)], "games": [int((th == i).sum()) for i in range(3)],
+            "fidelity": round(float(cos.mean()), 3), "dominant": int(np.bincount(th, minlength=3).argmax()), "recent": [int(x) for x in th[-5:][::-1]]}
+
+
 def build_profile(team, g, players_by_team, attrs, field):
     rows = team_games(g, team)
     if len(rows) < 6:                                  # equipe peu vue : elargit la fenetre
@@ -188,6 +227,7 @@ def build_profile(team, g, players_by_team, attrs, field):
     # style de compo
     allc = [c for r in rows for c in r["picks"]]
     P["style"] = style_of(allc, attrs)
+    P["themes"] = theme_profile(rows, g, attrs)
     P["recent"] = [{"date": str(r["date"])[:10], "opp": r["opp"], "win": r["win"], "side": r["side"], "tour": r["tour"]} for r in rows[-8:][::-1]]
     P["since"] = str(rows[0]["date"])[:10]
     return P
@@ -719,7 +759,7 @@ def main():
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     worlds = {"generated": now, "data_through": meta["data_through"], "rating_adjusted_games": int(len(wg)),
               "swiss": swiss, "standings": standings, "matches": out_matches, "profiles": {t: p for t, p in profiles.items() if p},
-              "meta_worlds": meta_w, "meta_recent": meta_m, "sim": {"n": N_SIM, "note": T("Règles officielles Riot : à partir du R2, adversaire tiré au hasard parmi les équipes du même bilan, sans revanche ; quarts : les 3-0 contre des 3-2 tirés au sort, les 4 autres au hasard ; demi-finales tirées au hasard (règle non publiée).", "Official Riot rules: from R2 on, opponent drawn at random among teams with the same record, no rematches; quarterfinals: the 3-0 teams vs 3-2 teams drawn at random, the other four at random; semifinal pairing random (rule not published).")},
+              "theme_names": [x[1] for x in THEMES], "meta_worlds": meta_w, "meta_recent": meta_m, "sim": {"n": N_SIM, "note": T("Règles officielles Riot : à partir du R2, adversaire tiré au hasard parmi les équipes du même bilan, sans revanche ; quarts : les 3-0 contre des 3-2 tirés au sort, les 4 autres au hasard ; demi-finales tirées au hasard (règle non publiée).", "Official Riot rules: from R2 on, opponent drawn at random among teams with the same record, no rematches; quarterfinals: the 3-0 teams vs 3-2 teams drawn at random, the other four at random; semifinal pairing random (rule not published).")},
               "ratings": {t: {"bt": tm[t]["bt"] + adj.get(t, 0.0), "pbt": tm[t].get("pbt", 0.0), "fw": tm[t].get("fw"), "ts_mu": tm[t].get("ts_mu"), "ts_sig": tm[t].get("ts_sig"), "power": tm[t]["power"]} for t in swiss if t in tm},
               "h2h": {k: v for k, v in H2H.items() if all(x in swiss for x in k.split("|"))},
               "done_ids": [m["id"] for m in out_matches if m["status"] == "completed" and m["stage"] == "Main Event"],
