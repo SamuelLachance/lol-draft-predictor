@@ -801,11 +801,20 @@ def main():
               "h2h": {k: v for k, v in H2H.items() if all(x in swiss for x in k.split("|"))},
               "done_ids": [m["id"] for m in out_matches if m["status"] == "completed" and m["stage"] == "Main Event"],
               "model": {"metrics": meta.get("metrics"), "blend": meta["blend"], "data_through": meta["data_through"]}}
-    json.dump(worlds, open(DATA / "worlds.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+    def _clean(o):                       # NaN/Inf (ex. VOD absente) ne sont pas du JSON valide -> null
+        if isinstance(o, float):
+            return o if math.isfinite(o) else None
+        if isinstance(o, dict):
+            return {k: _clean(v) for k, v in o.items()}
+        if isinstance(o, (list, tuple)):
+            return [_clean(v) for v in o]
+        return o
+    worlds = _clean(worlds)
+    json.dump(worlds, open(DATA / "worlds.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     live = {"generated": now, "version": now, "standings": [{k: s[k] for k in ("team", "w", "l", "qual", "title")} for s in standings],
             "matches": [{"id": m["id"], "slug": m["slug"], "t1": m["t1"], "t2": m["t2"], "s1": m["s1"], "s2": m["s2"], "status": m["status"], "date": m["date"], "bo": m["bo"],
                          "pred": (m.get("pred") or {}).get("series")} for m in out_matches]}
-    json.dump(live, open(DATA / "live.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+    json.dump(_clean(live), open(DATA / "live.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     print(f"worlds.json: {len(out_matches)} matchs | {len(profiles)} profils | swiss {len(swiss)} equipes | ajustements live {len(wg)} games")
     if sim:
         print("qualif :", sorted(((round(v, 2), k) for k, v in sim["qual"].items()), reverse=True)[:16])
