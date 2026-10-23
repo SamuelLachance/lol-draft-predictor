@@ -24,7 +24,7 @@ window.addEventListener('error',e=>{const v=document.getElementById('view');if(v
 const {$,el,esc,pct,t,tx}=LP;
 const ROLES=['top','jng','mid','bot','sup'];
 const RN={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Support'};
-const S={dv:null,live:null,hist:[],histId:null,liveSim:null,liveKey:'',W:null,slug:'',ev:null,details:null,win:null,es:[],winAt:0};
+const S={lm:null,t0:{},frames:{},bf:{},busy:false,dv:null,live:null,hist:[],histId:null,liveSim:null,liveKey:'',W:null,slug:'',ev:null,details:null,win:null,es:[],winAt:0};
 const ea=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
 const cur=()=>S.W&&S.W.matches.find(m=>m.slug===S.slug);
 const PRED=m=>{const l=S.liveSim&&S.liveSim.pred[m.slug];return l&&m.pred?Object.assign({},m.pred,{series:l.series,game:l.game,live:true}):m.pred};
@@ -43,7 +43,7 @@ async function pollLive(){const m=cur();if(!m||!S.ev||S.ev.state!=='inProgress')
   try{S.details=await LP.esDetails(S.ev.match.id);
     const g=(S.details.match.games||[]).find(x=>x.state==='inProgress');
     if(g){const w=await LP.liveWindow(g.id);if(w){S.win={game:g,w};S.winAt=Date.now()}}
-    paint()}catch(e){}}
+    paint();ensureTimeline()}catch(e){}}
 function paint(){renderLiveBlock();renderTop();LP.hydrate($('#top'))}
 async function pollAll(){await pollEs();pollLive()}
 
@@ -157,6 +157,38 @@ function liveProb(p0,tmin,fb,fr){
   const pp=sig(z0*w),pg=sig(z0*w+zg),pa=sig(z0*w+zg+zo);
   return {p:Math.min(.99,Math.max(.01,pa)),prior:pp,gold:pg-pp,obj:pa-pg};
 }
+// ---------- modele live APPRIS (ml/train_live.py : LightGBM sur des timelines reelles lolesports) ----------
+const teamRow=t=>{const ps=t.participants||[];return [t.totalGold,t.totalKills,t.towers,t.barons,t.inhibitors||0,t.dragons||[],ps.reduce((a,p)=>a+(p.level||0),0),ps.filter(p=>p.currentHealth>0).length,ps.reduce((a,p)=>a+(p.creepScore||0),0)]};
+// IDENTIQUE a row_feats() de ml/train_live.py (point de vue bleu)
+const liveFeats=(b,r,tm,lp,pv)=>{const soul=d=>d.length>=4?1:0;return [lp,tm,(b[0]-r[0])/1000,(b[0]-r[0])/Math.max(1,b[0]+r[0]),b[1]-r[1],b[1]+r[1],b[2]-r[2],b[5].length-r[5].length,soul(b[5])-soul(r[5]),b[3]-r[3],b[4]-r[4],b[6]-r[6],b[7]-r[7],b[8]-r[8],b[7],r[7],
+  pv?((b[0]-r[0])-(pv.b[0]-pv.r[0]))/1000:0,pv?((b[3]>pv.b[3]?1:0)-(r[3]>pv.r[3]?1:0)):0]};
+// echantillon ~3 min plus tot (dynamique de l'ecart d'or, buff de Baron) : le plus proche de tm-3 dans [tm-3.6, tm-2.4]
+const prevOf=(fr,tm)=>{let best=null,bd=9;(fr||[]).forEach(o=>{const d=tm-o.tm;if(d>=2.4&&d<=3.6&&Math.abs(d-3)<bd){bd=Math.abs(d-3);best=o}});return best};
+const treeV=(t,x)=>{while(typeof t!=='number')t=x[t[0]]<=t[1]?t[2]:t[3];return t};
+const lmP=(b,r,tm,lp,pv)=>{const M=S.lm,x=liveFeats(b,r,tm,lp,pv),e1=Math.exp(-tm/M.taus[0]),e2=Math.exp(-tm/M.taus[1]),L=M.lr;
+  let zl=L.bias[0]+L.bias[1]*e1+L.bias[2]*e2;L.cols.forEach((ci,i)=>{const w=L.w[i];zl+=(w[0]+w[1]*e1+w[2]*e2)*x[ci]/L.sd[i]});   // regression logistique a interactions temporelles
+  let zg=0;for(const t of M.trees)zg+=treeV(t,x);                                                                                    // arbres LightGBM
+  return sig(M.mix*zl+(1-M.mix)*zg)};
+const neutralRow=(b,r)=>[(b[0]+r[0])/2,(b[1]+r[1])/2,(b[2]+r[2])/2,0,0,[],(b[6]+r[6])/2,5,(b[8]+r[8])/2];
+const goldRow=(x,n)=>{const y=n.slice();y[0]=x[0];y[6]=x[6];y[8]=x[8];return y};
+const ptsOf=(f,T0)=>({tm:Math.max(0,(Date.parse(f.rfc460Timestamp)-T0)/60000),b:teamRow(f.blueTeam),r:teamRow(f.redTeam)});
+// reconstruit l'horloge reelle du game (debut par dichotomie) et l'historique complet (1 point / min) en rejouant le flux
+async function ensureTimeline(){
+  if(!S.win||!S.ev||S.busy)return;S.busy=true;
+  try{
+    const {game,w}=S.win,gid=game.id,f=w.frames[w.frames.length-1],nowMs=Date.parse(f.rfc460Timestamp);
+    if(S.t0[gid]===undefined){
+      let c=null;try{c=sessionStorage.getItem('lp_t0_'+gid)}catch(e){}
+      if(c)S.t0[gid]=+c;else{S.t0[gid]=await LP.findGameStart(gid,Date.parse(S.ev.startTime)-5*60e3,nowMs-60e3);if(S.t0[gid]!=null)try{sessionStorage.setItem('lp_t0_'+gid,S.t0[gid])}catch(e){}}
+    }
+    const T0=S.t0[gid];if(T0==null)return;
+    const fr=S.frames[gid]=S.frames[gid]||[];
+    if(!S.bf[gid]){S.bf[gid]=true;const times=[];for(let t=T0+60e3;t<nowMs-45e3;t+=60e3)times.push(t);
+      let i=0;await Promise.all(Array.from({length:6},async()=>{while(i<times.length){const t=times[i++],r=await LP.windowAt(gid,t);if(r)fr.push(ptsOf(r.frames[r.frames.length-1],T0))}}))}
+    const cur=ptsOf(f,T0);fr.push(cur);fr.sort((a,b)=>a.tm-b.tm);
+    const out=[];fr.forEach(o=>{if(!out.length||o.tm-out[out.length-1].tm>0.25)out.push(o);else if(o===cur)out[out.length-1]=o});S.frames[gid]=out;
+  }catch(e){S.err=String(e)}finally{S.busy=false;paint()}
+}
 function computeLive(m){
   if(!S.win||!m.t1||!m.t2)return null;
   const {game,w}=S.win,f=w.frames[w.frames.length-1],md=w.gameMetadata,bt=md.blueTeamMetadata,rt=md.redTeamMetadata;
@@ -176,22 +208,32 @@ function computeLive(m){
   const cb=champs(bt),cr=champs(rt),de=draftEval(cb,cr);
   const pre=sidedP(bTeam,rTeam,'pre',null),post=sidedP(bTeam,rTeam,'post',de?de.edge:null);
   const base=post!=null?post:pre!=null?pre:0.5;
-  const tmin=estMin((f.blueTeam.totalGold+f.redTeam.totalGold)/2);
-  const lv=liveProb(base,tmin,f.blueTeam,f.redTeam);
-  const flip=x=>t1blue?x:1-x;
-  // historique (persistant par game, pour la courbe)
-  if(S.histId!==game.id){S.histId=game.id;S.hist=[];try{S.hist=JSON.parse(sessionStorage.getItem('lp_h_'+game.id)||'[]')}catch(e){}}
-  const last=S.hist[S.hist.length-1],pT1=flip(lv.p);
-  if(!last||tmin>last.t+0.15){S.hist.push({t:+tmin.toFixed(2),p:+pT1.toFixed(4)});if(S.hist.length>400)S.hist.shift();try{sessionStorage.setItem('lp_h_'+game.id,JSON.stringify(S.hist))}catch(e){}}
-  const old=[...S.hist].reverse().find(o=>o.t<=tmin-2);
-  return {game,f,md,bt,rt,nB,nR,t1blue,side1:t1blue?'blue':'red',side2:t1blue?'red':'blue',cb,cr,de,tmin,lv,pT1,
+  const flip=x=>t1blue?x:1-x,T0=S.t0[game.id];
+  let lv,tmin,hist,model=false;
+  if(S.lm&&T0!=null&&T0!==undefined){                                           // vrai modele appris + horloge reelle
+    model=true;tmin=Math.max(0,(Date.parse(f.rfc460Timestamp)-T0)/60000);
+    const lp=lgt(Math.min(.98,Math.max(.02,base))),b=teamRow(f.blueTeam),r=teamRow(f.redTeam),N=neutralRow(b,r);
+    const pv=prevOf(S.frames[game.id],tmin),pvG=pv?{b:goldRow(pv.b,N),r:goldRow(pv.r,N)}:null;
+    const p0=lmP(N,N,tmin,lp,null),p1=lmP(goldRow(b,N),goldRow(r,N),tmin,lp,pvG),pa=lmP(b,r,tmin,lp,pv);
+    lv={p:pa,prior:p0,gold:p1-p0,obj:pa-p1,model:true};
+    const FR=S.frames[game.id]||[];hist=FR.map(o=>({t:o.tm,p:flip(lmP(o.b,o.r,o.tm,lp,prevOf(FR,o.tm)))}));
+    if(!hist.length||tmin-hist[hist.length-1].t>0.25)hist.push({t:tmin,p:flip(pa)});
+  }else{                                                                          // repli : heuristique (modele indisponible / debut de game introuvable)
+    tmin=estMin((f.blueTeam.totalGold+f.redTeam.totalGold)/2);lv=liveProb(base,tmin,f.blueTeam,f.redTeam);
+    if(S.histId!==game.id){S.histId=game.id;S.hist=[];try{S.hist=JSON.parse(sessionStorage.getItem('lp_h_'+game.id)||'[]')}catch(e){}}
+    const last=S.hist[S.hist.length-1];
+    if(!last||tmin>last.t+0.15){S.hist.push({t:+tmin.toFixed(2),p:+flip(lv.p).toFixed(4)});if(S.hist.length>400)S.hist.shift();try{sessionStorage.setItem('lp_h_'+game.id,JSON.stringify(S.hist))}catch(e){}}
+    hist=S.hist;
+  }
+  const pT1=flip(lv.p),old=[...hist].reverse().find(o=>o.t<=tmin-2);
+  return {game,f,md,bt,rt,nB,nR,t1blue,side1:t1blue?'blue':'red',side2:t1blue?'red':'blue',cb,cr,de,tmin,lv,pT1,model,hist,
     pPre:pre!=null?flip(pre):null,pPost:post!=null?flip(post):null,delta:old?pT1-old.p:null,bTeam,rTeam};
 }
 function spark(h,A,B){
   if(h.length<2)return `<div class="muted" style="font-size:12px">${t('La courbe se construit au fil des mises à jour (toutes les 10 s).','The chart builds up with each update (every 10 s).')}</div>`;
   const W_=320,H_=84,P=4,tm=Math.max(10,h[h.length-1].t),x=v=>P+(W_-2*P)*v/tm,y=p=>P+(H_-2*P)*(1-p);
   const pts=h.map(o=>x(o.t).toFixed(1)+','+y(o.p).toFixed(1)).join(' '),l=h[h.length-1];
-  return `<div class="sparkw"><span class="bluet">${esc(A)} ↑</span><span class="redt">${esc(B)} ↓</span></div><svg viewBox="0 0 ${W_} ${H_}" class="spark"><line x1="${P}" x2="${W_-P}" y1="${y(.5)}" y2="${y(.5)}" stroke="var(--line2)" stroke-dasharray="4 4"/><polyline fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round" points="${pts}"/><circle cx="${x(l.t).toFixed(1)}" cy="${y(l.p).toFixed(1)}" r="3.6" fill="var(--accent)"/></svg><div class="sparkw"><span>0'</span><span>~${Math.round(tm)}'</span></div>`;
+  return `<div class="sparkw"><span class="bluet">${esc(A)} ↑</span><span class="redt">${esc(B)} ↓</span></div><svg viewBox="0 0 ${W_} ${H_}" class="spark" preserveAspectRatio="none"><line x1="${P}" x2="${W_-P}" y1="${y(.5)}" y2="${y(.5)}" stroke="var(--line2)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/><polyline fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="${pts}"/><line x1="${x(l.t).toFixed(1)}" x2="${x(l.t).toFixed(1)}" y1="${y(l.p).toFixed(1)}" y2="${y(l.p).toFixed(1)}" stroke="var(--accent)" stroke-width="9" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg><div class="sparkw"><span>0'</span><span>~${Math.round(tm)}'</span></div>`;
 }
 function renderLiveBlock(){
   const b=$('#liveblock');const m=cur();if(!b||!m)return;
@@ -206,7 +248,7 @@ function renderLiveBlock(){
   const sdc=s=>`<i class="sq ${s==='blue'?'b':'r'}"></i>${s==='blue'?t('côté bleu','blue side'):t('côté rouge','red side')}`;
   const arrow=L.delta==null?'':Math.abs(L.delta)<0.005?'':`<span class="${L.delta>0?'bluet':'redt'}" style="font-size:.8rem">${L.delta>0?'▲':'▼'} ${Math.abs(L.delta*100).toFixed(1)} pts / 2 min ${t('pour','for')} ${esc(L.delta>0?A:B)}</span>`;
   const sn=seriesNow(m);
-  const brk=`<div class="brk"><span class="pill">${t('Départ (ratings + draft)','Start (ratings + draft)')} ${pct(flipP(lv.prior),0)}</span><span class="pill">${t('Or','Gold')} ${sgnPts(flipD(lv.gold))}</span><span class="pill">${t('Objectifs','Objectives')} ${sgnPts(flipD(lv.obj))}</span></div>`;
+  const brk=`<div class="brk"><span class="pill">${t('Départ (ratings + draft)','Start (ratings + draft)')} ${pct(flipP(lv.prior),0)}</span><span class="pill">${t('Or & niveaux','Gold & levels')} ${sgnPts(flipD(lv.gold))}</span><span class="pill">${t('Kills, objectifs, vivants','Kills, objectives, alive')} ${sgnPts(flipD(lv.obj))}</span></div>`;
   function flipP(x){return t1blue?x:1-x}
   function flipD(x){return t1blue?x:-x}
   function sgnPts(x){return (x>=0?'+':'')+(x*100).toFixed(1)+' pts'}
@@ -214,7 +256,7 @@ function renderLiveBlock(){
     const nm=LP.champName(p.championId),ro=ROLE_OF[p.role]||p.role;
     return `<div class="plrow">${LP.champ(nm,{noname:true})}<span><b>${LPC.player(String(p.summonerName).replace(/^\S+\s/,''),ro)}</b> <span class="muted">${esc(nm)} · ${t('niv.','lv.')} ${s.level||'?'}</span></span><span class="kda">${s.kills}/${s.deaths}/${s.assists} · ${s.creepScore||0} CS · ${((s.totalGold||0)/1000).toFixed(1)}k</span></div>`}).join('');
   const k1=FA.totalKills,k2=FB.totalKills;
-  b.innerHTML=`<div class="panel hl"><div class="phead"><h3><span class="livedot hot"></span>${t('En direct — game','Live — game')} ${game.number}</h3><span class="chip up">≈ ${Math.floor(L.tmin)}:${String(Math.floor(L.tmin%1*60)).padStart(2,'0')} ${t('(estimé)','(est.)')}</span><span class="muted" style="font-size:11px;margin-left:auto">${t('mis à jour','updated')} ${LP.ago(S.winAt)} · ${f.gameState}</span></div>
+  b.innerHTML=`<div class="panel hl"><div class="phead"><h3><span class="livedot hot"></span>${t('En direct — game','Live — game')} ${game.number}</h3><span class="chip up">${L.model?'':'≈ '}${Math.floor(L.tmin)}:${String(Math.floor(L.tmin%1*60)).padStart(2,'0')} ${L.model?'':t('(estimé)','(est.)')}</span><span class="muted" style="font-size:11px;margin-left:auto">${t('mis à jour','updated')} ${LP.ago(S.winAt)} · ${f.gameState}</span></div>
     <div class="pbody">
       <div class="lv">
         <div class="lvt L"><div class="tm bluet">${LPC.team(A,{b:false})}</div><div class="hside">${sdc(sideOf(true))}</div></div>
@@ -226,7 +268,7 @@ function renderLiveBlock(){
       <div class="hbar" style="margin:6px 0 10px"><span style="width:${pT1*100}%"></span></div>
       ${brk}
       ${sn?`<div class="muted" style="font-size:12px;margin:8px 0">${t('Série','Series')} Bo${m.bo} : <b class="bluet">${esc(A)} ${pct(sn.v,1)}</b> · <b class="redt">${esc(B)} ${pct(1-sn.v,1)}</b></div>`:''}
-      ${spark(S.hist||[],A,B)}
+      ${spark(L.hist||[],A,B)}
       <div class="sec">${t('Comparatif en jeu','In-game comparison')}</div>
       ${cmp(t('Or total','Total gold'),FA.totalGold,FB.totalGold,x=>(x/1000).toFixed(1)+'k')}
       ${cmp('Kills',k1,k2,x=>x)}${cmp(t('Tours','Towers'),FA.towers,FB.towers,x=>x)}${cmp(t('Dragons','Dragons'),dr(FA.dragons),dr(FB.dragons),x=>x)}${cmp('Barons',FA.barons,FB.barons,x=>x)}${cmp(t('Inhibiteurs','Inhibitors'),FA.inhibitors||0,FB.inhibitors||0,x=>x)}
@@ -234,7 +276,7 @@ function renderLiveBlock(){
       ${draftLive(L,m)}
       <div class="sec">${t('Joueurs','Players')}</div>
       <div class="pl"><div>${rowsFor(MA,FA)}</div><div>${rowsFor(MB,FB)}</div></div>
-      <div class="note" style="padding-left:0;padding-right:0">${t('Proba live = heuristique : départ (ratings + valeur de draft du modèle) qui s\'estompe avec le temps + écart d\'or pondéré selon la phase de jeu + objectifs (tours, dragons, baron, inhibiteurs). Non calibrée sur des séries temporelles : à lire comme une tendance. L\'horloge est estimée à partir de l\'or total (le flux ne la donne pas).','Live probability is a heuristic: a starting point (ratings + the model\'s draft value) that fades with time + gold lead weighted by game phase + objectives (towers, dragons, baron, inhibitors). Not calibrated on time series: read it as a trend. The clock is estimated from total gold (the feed does not provide it).')}</div>
+      <div class="note" style="padding-left:0;padding-right:0">${L.model?t(`Modèle live appris (régression logistique à interactions temporelles + arbres LightGBM) sur ${S.lm.n_games} games réelles rejouées depuis le flux lolesports (or, kills, tours, dragons/âme, barons, inhibiteurs, niveaux, joueurs en vie, dynamique de l'or, buff de baron, minute) + la proba de départ du modèle de draft. Précision en validation croisée par game ${(S.lm.metrics.acc_test*100).toFixed(1)} % (départ seul : ${(S.lm.metrics.acc_prior*100).toFixed(1)} %), log-loss ${S.lm.metrics.logloss_test.toFixed(3)} contre ${S.lm.metrics.logloss_prior.toFixed(3)}. Les pastilles décomposent le calcul : départ → or & niveaux → kills, objectifs, joueurs en vie.`,`Live model learned (logistic regression with time interactions + LightGBM trees) on ${S.lm.n_games} real games replayed from the lolesports feed (gold, kills, towers, dragons/soul, barons, inhibitors, levels, players alive, gold momentum, baron buff, minute) + the draft model's starting probability. Game-grouped cross-validated accuracy ${(S.lm.metrics.acc_test*100).toFixed(1)}% (start alone: ${(S.lm.metrics.acc_prior*100).toFixed(1)}%), log-loss ${S.lm.metrics.logloss_test.toFixed(3)} vs ${S.lm.metrics.logloss_prior.toFixed(3)}. The pills break the calculation down: start → gold & levels → kills, objectives, players alive.`):t('Proba live = heuristique de repli (modèle appris ou début du game indisponible) : départ qui s\'estompe + écart d\'or + objectifs ; l\'horloge est estimée à partir de l\'or total.','Live probability = fallback heuristic (learned model or game start unavailable): fading start + gold lead + objectives; the clock is estimated from total gold.')}</div>
     </div></div>`;
   LP.hydrate(b);
 }
@@ -433,11 +475,12 @@ async function boot(){
     const [teams,players,regions]=await Promise.all(['teams','players','regions'].map(get));
     S.W=await LP.json('worlds',true);
     fetch('../model/draft_v2.json').then(r=>r.json()).then(d=>{S.dv=d;if(S.win)paint()}).catch(()=>{});
+    fetch('../model/live_v1.json').then(r=>r.json()).then(d=>{S.lm=d;if(S.win)paint()}).catch(()=>{});
     LPC.init({teams,players,regions,worlds:S.W});
   }catch(e){$('#view').innerHTML='<div class="err">⚠ '+esc(e.message)+'</div>';return}
   render();
   document.addEventListener('lp:lang',()=>{render()});
-  window.addEventListener('hashchange',()=>{S.slug=decodeURIComponent(location.hash.slice(1));S.ev=null;S.details=null;S.win=null;S.live=null;S.hist=[];S.histId=null;render();pollAll()});
+  window.addEventListener('hashchange',()=>{S.slug=decodeURIComponent(location.hash.slice(1));S.ev=null;S.details=null;S.win=null;S.live=null;S.hist=[];S.histId=null;S.busy=false;render();pollAll()});
   pollAll();setInterval(pollAll,20000);setInterval(pollLive,10000);setInterval(countdown,1000);
 }
 boot();

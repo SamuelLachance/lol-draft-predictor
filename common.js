@@ -94,6 +94,20 @@
     return null;
   };
 
+  // flux livestats rejouable : fenetre a un instant PASSE (multiple de 10 s, sinon 400). null = pas encore commence / indisponible
+  LP.windowAt = async (gid, ms) => {
+    const st = new Date(Math.floor(ms / 10000) * 10000).toISOString();
+    try { const r = await fetch('https://feed.lolesports.com/livestats/v1/window/' + gid + '?startingTime=' + st); if (!r.ok) return null;
+      const tx = await r.text(); if (!tx) return null; const d = JSON.parse(tx); return d.frames && d.frames.length ? d : null } catch (e) { return null }
+  };
+  // debut du game (+-10 s) : le flux ne repond qu'apres le debut -> recherche dichotomique (meme methode que l'entrainement du modele live)
+  LP.findGameStart = async (gid, loMs, hiMs) => {
+    const q = ms => LP.windowAt(gid, ms); let a = Math.floor(loMs / 10000) * 10000, b = Math.floor(hiMs / 10000) * 10000;
+    if (!(await q(b))) return null; if (await q(a)) return a;
+    while (b - a > 10000) { const m = a + Math.round((b - a) / 2 / 10000) * 10000; if (m <= a || m >= b) break; if (await q(m)) b = m; else a = m }
+    return b;
+  };
+
   // ---------- squelette commun ----------
   LP.langBtn = () => { const b = LP.el('button', 'lang', lang.toUpperCase()); b.title = 'FR / EN'; b.onclick = () => { LP.setLang(lang === 'fr' ? 'en' : 'fr'); b.textContent = lang.toUpperCase() }; return b };
   LP.themeBtn = () => { const b = LP.el('button', 'tog', '◐'); b.onclick = LP.toggleTheme; return b };
