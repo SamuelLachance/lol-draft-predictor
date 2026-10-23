@@ -270,6 +270,20 @@ function formPanel(m){
   const col=(team,P)=>`<div><b>${LPC.team(team,{b:false})}</b><div class="mt">`+(P?`<table><tbody>${P.recent.map(r=>`<tr><td class="muted">${r.date}</td><td class="${r.win?'ok':'no'}"><b>${r.win?'W':'L'}</b></td><td>${LPC.team(r.opp,{b:false})} <span class="muted" style="font-size:10px">(${r.side==='blue'?t('bleu','blue'):t('rouge','red')})</span></td><td class="muted" style="font-size:11px">${esc(r.tour)}</td></tr>`).join('')}</tbody></table>`:'–')+`</div></div>`;
   const b=el('div','pbody');b.innerHTML=`<div class="two">${col(A,PA)}${col(B,PB)}</div>`;pn.append(b);return pn;
 }
+async function boot(){
+  $('#hbtn').append(LP.langBtn(),LP.themeBtn());
+  S.slug=decodeURIComponent(location.hash.slice(1));
+  try{
+    const get=f=>LP.json(f).catch(()=>[]);
+    const [teams,players,regions]=await Promise.all(['teams','players','regions'].map(get));
+    S.W=await LP.json('worlds',true);
+    LPC.init({teams,players,regions,worlds:S.W});
+  }catch(e){$('#view').innerHTML='<div class="err">⚠ '+esc(e.message)+'</div>';return}
+  render();
+  document.addEventListener('lp:lang',()=>{render()});
+  window.addEventListener('hashchange',()=>{S.slug=decodeURIComponent(location.hash.slice(1));S.ev=null;S.details=null;S.win=null;render();pollAll()});
+  pollAll();setInterval(pollAll,20000);setInterval(pollLive,10000);setInterval(countdown,1000);
+}
 boot();
 </script>
 </body></html>
