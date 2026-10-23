@@ -22,8 +22,8 @@ Les décalages de ligue ne sont appris que sur les matchs inter-ligues (Worlds/M
 |---|---|---|
 | Ancien Elo séquentiel | 0.657 | 61.5 % |
 | BT inter-ligues | 0.644 | 63.7 % |
-| + TrueSkill roster | 0.640 | 63.6 % |
-| + draft (modèle final) | **0.638** | **63.9 %** |
+| + TrueSkill roster | 0.641 | 63.7 % |
+| + draft (modèle final) | **0.639** | **63.8 %** |
 
 La draft seule vaut ~54 % : elle n'apporte qu'un petit ajustement (−0.002 de log-loss) au-dessus de la force d'équipe. Probabilités bien calibrées (voir `ml/eval_strength.py`, `ml/eval_draft.py`). Les hyperparamètres (demi-vie 180 j, ridge…) viennent d'une grille walk-forward.
 

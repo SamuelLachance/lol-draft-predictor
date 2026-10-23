@@ -165,7 +165,7 @@ def main() -> int:
             continue
         rows.append({"gameid": gid, "league": g["league"], "date": g["date"], "patch": g["patch"],
                      "side": side, "position": role,
-                     "playername": val(r, "Link"), "teamname": team,
+                     "playername": re.sub(r"\s*\(.*?\)", "", str(val(r, "Link") or "")) or None, "teamname": team,
                      "champion": val(r, "Champion"),
                      "result": 1 if str(team) == str(g["win"]) else 0,
                      "kills": val(r, "Kills"), "deaths": val(r, "Deaths"), "assists": val(r, "Assists"),
@@ -205,6 +205,8 @@ def main() -> int:
           f"({pd.to_datetime(fresh.date).min()} a {pd.to_datetime(fresh.date).max()})")
 
     if base is not None:
+        # identite joueur unique : "Lucid (Choi Yong-hyeok)" (Leaguepedia) == "Lucid" (Oracle's Elixir)
+        base["playername"] = base["playername"].map(lambda x: re.sub(r"\s*\(.*?\)", "", x) if isinstance(x, str) else x)
         base = base[~base.gameid.map(is_minor)]          # purge des games mineures deja ingerees par erreur
         keep = base[~base.gameid.isin(set(fresh.gameid))]
         combined = pd.concat([keep, fresh], ignore_index=True, sort=False)
