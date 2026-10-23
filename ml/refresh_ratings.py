@@ -13,7 +13,7 @@ import json, sys
 from pathlib import Path
 import numpy as np, pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import strength as st, model_v2 as mv
+import strength as st, model_v2 as mv, jsonsafe as jsafe
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAP = ROOT / "data" / "board_input.parquet"
@@ -61,23 +61,23 @@ def main() -> int:
         if res:
             t["form"] = f"{sum(res)}-{len(res) - sum(res)}"
     teams.sort(key=lambda t: -t["power"])
-    json.dump(teams, open(OUT / "teams.json", "w", encoding="utf-8"), ensure_ascii=False)
+    jsafe.dump(teams, open(OUT / "teams.json", "w", encoding="utf-8"), ensure_ascii=False)
     regions = []
     for k in sorted(st.MAJOR, key=lambda k: -off.get(k, 0)):
         pw = [t["power"] for t in teams if t["region"] == k]
         regions.append({"region": k, "rating": round(st.to_elo(off.get(k, 0.0))), "mean_team_elo": round(float(np.mean(pw))) if pw else None, "n": len(pw)})
-    json.dump(regions, open(OUT / "regions.json", "w", encoding="utf-8"), ensure_ascii=False)
+    jsafe.dump(regions, open(OUT / "regions.json", "w", encoding="utf-8"), ensure_ascii=False)
     # confrontations directes (2 ans)
     h2h = {}
     for r in G[G.date >= asof - pd.Timedelta(days=730)].itertuples():
         if r.blue in names and r.red in names:
             e = h2h.setdefault("|".join(sorted((r.blue, r.red))), {"n": 0, "w": {}}); e["n"] += 1
             w = r.blue if r.y else r.red; e["w"][w] = e["w"].get(w, 0) + 1
-    json.dump(h2h, open(OUT / "h2h.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+    jsafe.dump(h2h, open(OUT / "h2h.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
     meta = json.load(open(OUT / "meta.json", encoding="utf-8"))
     meta["data_through"] = str(G.date.max().date()); meta["data_through_ts"] = str(G.date.max())
     meta["blend"]["bt_side"] = float(side); meta["blend"]["pbt_side"] = float(pside); meta["refit_at"] = str(pd.Timestamp.now(tz="UTC"))[:19]
-    json.dump(meta, open(OUT / "meta.json", "w", encoding="utf-8"), ensure_ascii=False)
+    jsafe.dump(meta, open(OUT / "meta.json", "w", encoding="utf-8"), ensure_ascii=False)
     print(f"refit: {len(G)} games jusqu'a {G.date.max()} | {len(teams)} equipes | top: {[(t['team'], t['power']) for t in teams[:5]]}")
     return 0
 

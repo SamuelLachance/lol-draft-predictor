@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 import trueskill as ts
 import sys; sys.path.insert(0,str(Path(__file__).resolve().parent))
-import strength as st, draftmodel as dm, model_v2 as mv, features as ft, rapm
+import strength as st, draftmodel as dm, model_v2 as mv, features as ft, rapm, jsonsafe as jsafe
 ROOT=Path(__file__).resolve().parents[1]; PROC=ROOT/"data"/"processed"; OUT=ROOT/"web"/"public"/"data"; OUT.mkdir(parents=True,exist_ok=True)
 MODEL_OUT=ROOT/"web"/"public"/"model"; MODEL_OUT.mkdir(parents=True,exist_ok=True)
 ROLES=["top","jng","mid","bot","sup"]
@@ -112,7 +112,7 @@ def main():
         v=float(coef[j])*dm.SCALE[k[0]]
         if k[0]=="c": dv["c"][k[2:]]=round(v,3)
         elif abs(v)>=0.04: dv[k[0]][k[2:]]=round(v,3)
-    json.dump({"asof":str(asof.date()),"b0":dmod["b0"],"weight":wq["draft"],**dv},open(MODEL_OUT/"draft_v2.json","w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
+    jsafe.dump({"asof":str(asof.date()),"b0":dmod["b0"],"weight":wq["draft"],**dv},open(MODEL_OUT/"draft_v2.json","w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
 
     # ---- roster actuel par equipe = titulaire MODAL des 20 derniers games tier-1/internationaux ----
     recent=pl[(pl.year>=2025)&pl.league.isin(TIER1)]
@@ -162,7 +162,7 @@ def main():
             "form":f"{f10}-{len(mm)-f10}","last":str(lastd.get(t,pd.NaT))[:10],
             "roster":rost,"matches":team_matches.get(t,[])})
     teams.sort(key=lambda t:-t["power"])
-    json.dump(teams,open(OUT/"teams.json","w",encoding="utf-8"),ensure_ascii=False)
+    jsafe.dump(teams,open(OUT/"teams.json","w",encoding="utf-8"),ensure_ascii=False)
     tnames={t["team"] for t in teams}
     h2h={}
     rec2=dt[dt._date>=asof-pd.Timedelta(days=730)]
@@ -170,7 +170,7 @@ def main():
         if r_.blue_team in tnames and r_.red_team in tnames:
             k_="|".join(sorted((r_.blue_team,r_.red_team))); e_=h2h.setdefault(k_,{"n":0,"w":{}}); e_["n"]+=1
             wn=r_.blue_team if r_.blue_win else r_.red_team; e_["w"][wn]=e_["w"].get(wn,0)+1
-    json.dump(h2h,open(OUT/"h2h.json","w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
+    jsafe.dump(h2h,open(OUT/"h2h.json","w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
 
     # ---- players.json : PERF INDIVIDUELLE (signal primaire) + contexte d'equipe calibre par ligue ----
     rt1=recent.copy().sort_values("_date")
@@ -220,7 +220,7 @@ def main():
             "kda":round(float(r.kda),2) if r.kda==r.kda else 0,"kp":round(float(r.kp),2) if r.kp==r.kp else 0,
             "last":d.get("last",""),"champs":d.get("champs",[]),"recent":d.get("recent",[])})
     players.sort(key=lambda p:-p["rating"])
-    json.dump(players,open(OUT/"players.json","w",encoding="utf-8"),ensure_ascii=False)
+    jsafe.dump(players,open(OUT/"players.json","w",encoding="utf-8"),ensure_ascii=False)
 
     # ---- champions.json (TrueSkill + valeur de draft ajustee, tier-1 recent) ----
     cc2=recent.groupby(["champion","position"]).agg(games=("result","count"),wr=("result","mean"),gd15=("golddiffat15","mean")).reset_index()
@@ -241,27 +241,27 @@ def main():
             "hv":round(sg_(a_)-raw_,1) if a_ is not None else None,
             "games":int(r.games),"wr":round(float(r.wr),3),"gd15":int(r.gd15) if r.gd15==r.gd15 else 0})
     champs.sort(key=lambda c:-(c["adj"] if c["adj"] is not None else c["dv"]))
-    json.dump(champs,open(OUT/"champions.json","w",encoding="utf-8"),ensure_ascii=False)
+    jsafe.dump(champs,open(OUT/"champions.json","w",encoding="utf-8"),ensure_ascii=False)
     seen=sorted(set(pd.unique(dt[PICK].astype(str).values.ravel())))
     pool=[{"champion":c,"ts":round(CR[c].mu-3*CR[c].sigma,1)} for c in seen if c and c!="nan"]
-    json.dump(pool,open(OUT/"champ_pool.json","w",encoding="utf-8"),ensure_ascii=False)
+    jsafe.dump(pool,open(OUT/"champ_pool.json","w",encoding="utf-8"),ensure_ascii=False)
 
     # ---- regions.json : force de ligue (decalage inter-ligues) ----
     regions=[]
     for k in sorted(st.MAJOR,key=lambda k:-off.get(k,0)):
         ts_=[t["power"] for t in teams if t["region"]==k]
         regions.append({"region":k,"rating":round(st.to_elo(off.get(k,0.0))),"mean_team_elo":round(float(np.mean(ts_))) if ts_ else None,"n":len(ts_)})
-    json.dump(regions,open(OUT/"regions.json","w",encoding="utf-8"),ensure_ascii=False)
+    jsafe.dump(regions,open(OUT/"regions.json","w",encoding="utf-8"),ensure_ascii=False)
 
     # ---- matches.json : 300 derniers matchs majeurs/internationaux, prob pre-draft hors-echantillon ----
     ok=dt.league.isin(TIER1)&dt.p.notna()
     last=dt[ok].tail(300)
     matches=[{"date":str(pd.to_datetime(r.date).date()),"blue":str(r.blue_team),"red":str(r.red_team),"pred":round(float(r.p),3),"blue_win":int(r.blue_win)} for r in last.itertuples()]
-    json.dump(matches[::-1],open(OUT/"matches.json","w",encoding="utf-8"),ensure_ascii=False)
+    jsafe.dump(matches[::-1],open(OUT/"matches.json","w",encoding="utf-8"),ensure_ascii=False)
     acc300=float(((last.p>=.5).astype(int)==last.blue_win).mean())
 
     data_through=str(dt._date.max().date())
-    json.dump({"updated":str(pd.Timestamp.now().date()),"data_through":data_through,
+    jsafe.dump({"updated":str(pd.Timestamp.now().date()),"data_through":data_through,
         "n_teams":len(teams),"n_players":len(players),"n_champions":len(champs),"n_games":int(n),
         "model":"v4 stack: team + player Bradley-Terry, roster TrueSkill, form, head-to-head, draft, player-champion mastery","recent_acc":round(acc300,3),
         "blend":{"pre":W["pre"],"post":W["post"],"bt_side":bt_side,"pbt_side":pbt_side},"metrics":metrics,"bt_params":mv.BT,"pbt_params":mv.PBT,

@@ -61,6 +61,16 @@ jobs:
           python ml/build_board.py
           python ml/build_worlds.py
 
+      - name: Validate JSON (no NaN/Infinity) before publishing
+        run: |
+          python - <<'PY'
+          import glob, json
+          def bad(c): raise ValueError("invalid JSON constant: " + c)
+          for f in glob.glob("web/public/data/*.json") + glob.glob("web/public/model/*.json"):
+              json.load(open(f, encoding="utf-8"), parse_constant=bad)
+          print("JSON ok")
+          PY
+
       - name: Show summary
         run: cat web/public/data/meta.json
 
