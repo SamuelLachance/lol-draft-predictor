@@ -31,14 +31,7 @@ def destring(df):
         if str(df[c].dtype)=="string": df[c]=df[c].astype(object).where(df[c].notna(),None)
     return df
 
-def canon_map(oe):
-    """GIANTX/GiantX, 'Gen.G'/'GenG'... -> graphie la plus recente (evite les doublons d'equipes)."""
-    t=oe[oe.position.astype(str).str.lower()=="team"][["teamname","_date"]].dropna()
-    t=t.assign(k=t.teamname.str.casefold().str.replace(r"[\s.\-]","",regex=True))
-    last=t.sort_values("_date").groupby("k").teamname.last()
-    d={n:st.alias(last[k]) for n,k in zip(t.teamname,t.k)}
-    d.update({a:c for a,c in st.ALIASES.items()})
-    return d
+canon_map=st.canon_map
 
 def mode_or(s,default=""):
     m=s.mode(); return str(m.iloc[0]) if len(m) else default

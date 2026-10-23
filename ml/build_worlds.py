@@ -278,14 +278,39 @@ def game_p(a, b, tm, adj, meta):
     return 0.5 * (p_blue + 1 - p_red), p_blue, 1 - p_red
 
 
-# ------------------------------------------------------------------ simulation Swiss
+# ------------------------------------------------------------------ simulation Swiss (regles OFFICIELLES)
+# Riot : R1 tirage par tiers (deja fait, connu via le calendrier). Des le R2 : adversaire tire AU HASARD parmi les
+# equipes du MEME BILAN, jamais deux fois le meme adversaire (meme region autorise). 3 victoires = qualifie, 3 defaites = elimine.
+# Bo3 des qu'une equipe a 2 victoires ou 2 defaites (verifie sur le calendrier officiel), sinon Bo1.
+# Quarts (tirage du 31/10) : les deux 3-0 contre deux des 3-2 tires au sort ; les 4 autres equipes tirees au sort entre elles.
 def bo_for(w1, l1, w2, l2):
     return 3 if (max(w1, w2) == 2 or max(l1, l2) == 2) else 1
 
 
-def simulate_swiss(teams16, results, fixtures_by_round, pf, n_sims, force=None, rng=RNG):
-    """results : {frozenset((a,b)) tuples...}. fixtures_by_round[N] = [(a,b,bo,winner|None)].
-    force = (a, b, winner) impose le resultat d'un match a venir. Retourne stats par equipe."""
+def draw_pairs(grp, played, rng):
+    """appariement uniforme parmi les perfect matchings sans revanche (rejet puis backtracking) ; None si impossible."""
+    for _ in range(200):
+        g = grp[:]; rng.shuffle(g)
+        ps = [(g[i], g[i + 1]) for i in range(0, len(g) - 1, 2)]
+        if not any(frozenset(p) in played for p in ps):
+            return ps
+    def rec(rest):
+        if not rest:
+            return []
+        a, others = rest[0], rest[1:]
+        cands = [b for b in others if frozenset((a, b)) not in played]; rng.shuffle(cands)
+        for b in cands:
+            r = rec([x for x in others if x != b])
+            if r is not None:
+                return [(a, b)] + r
+        return None
+    g = grp[:]; rng.shuffle(g)
+    return rec(g)
+
+
+def simulate_swiss(teams16, results, fixtures_by_round, pf, n_sims, force=None, rng=RNG, past=None):
+    """fixtures_by_round[N] = [(a,b,bo,winner|None)] pour les matchs DEJA connus (joues ou programmes).
+    past = ensemble de frozenset((a,b)) deja joues (anti-revanche). force=(a,b,winner) impose un match a venir."""
     qual = Counter(); rec_dist = defaultdict(Counter); qualified_lists = []
     for _ in range(n_sims):
         W = {t: 0 for t in teams16}; Lc = {t: 0 for t in teams16}; played = set()
@@ -295,16 +320,13 @@ def simulate_swiss(teams16, results, fixtures_by_round, pf, n_sims, force=None, 
                 if a not in W or b not in W or W[a] >= 3 or Lc[a] >= 3 or W[b] >= 3 or Lc[b] >= 3:
                     continue
                 pairs.append((a, b, bo, win)); done.add(a); done.add(b)
-            # equipes restantes : appariement aleatoire au sein du meme bilan, sans revanche si possible
             rest = [t for t in teams16 if t not in done and W[t] < 3 and Lc[t] < 3]
             groups = defaultdict(list)
             for t in rest: groups[(W[t], Lc[t])].append(t)
             for grp in groups.values():
-                for _try in range(30):
-                    rng.shuffle(grp)
-                    ps = [(grp[i], grp[i + 1]) for i in range(0, len(grp) - 1, 2)]
-                    if not any(frozenset(p) in played for p in ps):
-                        break
+                ps = draw_pairs(grp, played, rng)
+                if ps is None:                                   # etat incoherent : on ignore l'anti-revanche
+                    g_ = grp[:]; rng.shuffle(g_); ps = [(g_[i], g_[i + 1]) for i in range(0, len(g_) - 1, 2)]
                 for a, b in ps:
                     pairs.append((a, b, bo_for(W[a], Lc[a], W[b], Lc[b]), None))
             for a, b, bo, win in pairs:
@@ -315,7 +337,7 @@ def simulate_swiss(teams16, results, fixtures_by_round, pf, n_sims, force=None, 
                         win = a if rng.random() < pf(a, b, bo) else b
                 lo = b if win == a else a
                 W[win] += 1; Lc[lo] += 1; played.add(frozenset((a, b)))
-        q = [t for t in teams16 if W[t] >= 3]
+        q = [(t, Lc[t]) for t in teams16 if W[t] >= 3]
         qualified_lists.append(q)
         for t in teams16:
             rec_dist[t][(W[t], Lc[t])] += 1
@@ -326,15 +348,22 @@ def simulate_swiss(teams16, results, fixtures_by_round, pf, n_sims, force=None, 
 
 
 def knockout_odds(qlists, pf5, rng=RNG):
-    """probabilites de titre : bracket QF tire au hasard parmi les qualifies (approximation)."""
+    """cotes de titre avec le tirage OFFICIEL des quarts ; demis : appariement des 4 vainqueurs tire au hasard (regle non publiee)."""
     title = Counter(); sf = Counter(); n = 0
     for q in qlists:
         if len(q) != 8:
             continue
-        n += 1; q = q[:]; rng.shuffle(q)
-        def play(a, b): return a if rng.random() < pf5(a, b) else b
-        w4 = [play(q[0], q[1]), play(q[2], q[3]), play(q[4], q[5]), play(q[6], q[7])]
+        n += 1
+        z = [t for t, l in q if l == 0]; two = [t for t, l in q if l == 2]; one = [t for t, l in q if l == 1]
+        play = lambda a, b: a if rng.random() < pf5(a, b) else b
+        if len(z) == 2 and len(two) == 3 and len(one) == 3:
+            rng.shuffle(two); m = [(z[0], two[0]), (z[1], two[1])]
+            rest = one + [two[2]]; rng.shuffle(rest); m += [(rest[0], rest[1]), (rest[2], rest[3])]
+        else:
+            ts_ = [t for t, _ in q]; rng.shuffle(ts_); m = [(ts_[i], ts_[i + 1]) for i in range(0, 8, 2)]
+        w4 = [play(a, b) for a, b in m]
         for t in w4: sf[t] += 1
+        rng.shuffle(w4)
         f = [play(w4[0], w4[1]), play(w4[2], w4[3])]
         title[play(f[0], f[1])] += 1
     return {t: title[t] / n for t in title} if n else {}, {t: sf[t] / n for t in sf} if n else {}
@@ -619,7 +648,9 @@ def main():
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     worlds = {"generated": now, "data_through": meta["data_through"], "rating_adjusted_games": int(len(wg)),
               "swiss": swiss, "standings": standings, "matches": out_matches, "profiles": {t: p for t, p in profiles.items() if p},
-              "meta_worlds": meta_w, "meta_recent": meta_m, "sim": {"n": N_SIM, "note": T("Appariements futurs simulés au hasard au sein d'un même bilan (hors revanche) ; bracket des quarts tiré au hasard.", "Future pairings simulated randomly within each record group (no rematches); quarterfinal bracket drawn at random.")},
+              "meta_worlds": meta_w, "meta_recent": meta_m, "sim": {"n": N_SIM, "note": T("Règles officielles Riot : à partir du R2, adversaire tiré au hasard parmi les équipes du même bilan, sans revanche ; quarts : les 3-0 contre des 3-2 tirés au sort, les 4 autres au hasard ; demi-finales tirées au hasard (règle non publiée).", "Official Riot rules: from R2 on, opponent drawn at random among teams with the same record, no rematches; quarterfinals: the 3-0 teams vs 3-2 teams drawn at random, the other four at random; semifinal pairing random (rule not published).")},
+              "ratings": {t: {"bt": tm[t]["bt"] + adj.get(t, 0.0), "ts_mu": tm[t].get("ts_mu"), "ts_sig": tm[t].get("ts_sig"), "power": tm[t]["power"]} for t in swiss if t in tm},
+              "done_ids": [m["id"] for m in out_matches if m["status"] == "completed" and m["stage"] == "Main Event"],
               "model": {"metrics": meta.get("metrics"), "blend": meta["blend"], "data_through": meta["data_through"]}}
     json.dump(worlds, open(DATA / "worlds.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
     live = {"generated": now, "version": now, "standings": [{k: s[k] for k in ("team", "w", "l", "qual", "title")} for s in standings],

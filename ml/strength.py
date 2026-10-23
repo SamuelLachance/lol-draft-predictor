@@ -29,6 +29,16 @@ def alias(name):
     return ALIASES.get(name, name)
 
 
+def canon_map(oe: pd.DataFrame) -> dict:
+    """GIANTX/GiantX, 'Gen.G'/'GenG'... -> graphie la plus recente (evite les doublons d'equipes)."""
+    t = oe[oe.position.astype(str).str.lower() == "team"][["teamname", "_date"]].dropna()
+    t = t.assign(k=t.teamname.str.casefold().str.replace(r"[\s.\-]", "", regex=True))
+    last = t.sort_values("_date").groupby("k").teamname.last()
+    d = {n: alias(last[k]) for n, k in zip(t.teamname, t.k)}
+    d.update(ALIASES)
+    return d
+
+
 def group_of(lg: str) -> str:
     return GROUP.get(lg, lg)
 

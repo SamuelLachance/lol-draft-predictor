@@ -16,6 +16,9 @@
 </div>
 <script src="../common.js"></script>
 <script>
+window.addEventListener('error',e=>{const v=document.getElementById('view');if(v&&!v.querySelector('.panel'))v.innerHTML='<div class="err">⚠ '+String(e.message).replace(/</g,'&lt;')+'</div>'});
+</script>
+<script>
 const {$,el,esc,pct,t,tx}=LP;
 const ROLES=['top','jng','mid','bot','sup'];
 const RN={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Support'};
@@ -168,7 +171,7 @@ function gamesPanel(m){
       <div><div class="redt"><b>${esc(g.red)}</b> <span class="muted">(${t('rouge','red')})</span></div>${dr(g.red_picks,g.red_players)}<div class="muted" style="font-size:11px">Bans ${bans(g.red_bans)}</div></div></div>
       ${p?`<div class="muted" style="font-size:12px;margin-top:6px">${t('Modèle','Model')} : ${esc(g.blue)} ${pct(p.pre,1)} ${t('avant draft','pre-draft')} → <b>${pct(p.post,1)}</b> ${t('après draft','post-draft')} (${t('avantage de draft','draft edge')} <b class="${g.draft_edge>=0?'bluet':'redt'}">${g.draft_edge>=0?'+':''}${g.draft_edge.toFixed(2)}</b> ${g.draft_edge>=0?t('bleu','blue'):t('rouge','red')}) ${g.draft_top&&g.draft_top[0]?` · ${t('pick clé','key pick')} : ${esc(g.draft_top[0].champion)} (${g.draft_top[0].side==='blue'?t('bleu','blue'):t('rouge','red')})`:''}</div>`:''}`;
     b.append(d)});
-  b.append(el('div','note',t('Probabilités « modèle » des games déjà joués : ratings du dernier build (qui peut inclure ces games) — indicatif, pas hors-échantillon.','“Model” probabilities for games already played use the latest build's ratings (which may include these games) — indicative, not out-of-sample.')));
+  b.append(el('div','note',t('Probabilités « modèle » des games déjà joués : ratings du dernier build (qui peut inclure ces games) — indicatif, pas hors-échantillon.','“Model” probabilities for games already played use ratings from the latest build (which may include these games) — indicative, not out-of-sample.')));
   pn.append(b);return pn;
 }
 
