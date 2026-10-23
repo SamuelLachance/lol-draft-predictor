@@ -177,16 +177,24 @@ function gamesPanel(m){
 
 // ---------- champions contestés ----------
 function contestedPanel(m){
-  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Champions contestés','Contested champions')}</h3><span class="muted" style="font-size:11px">${t('présence = % des games où le champion est pick ou ban (équipes + meta Worlds)','presence = % of games where the champion is picked or banned (teams + Worlds meta)')}</span></div>`;
-  const A=m.t1,B=m.t2;
-  const cell=(x,key)=>{const r=x[key];const pk=r.picks?`<b>${r.picks}</b>p${r.picks>=2?` · ${pct(r.wins/r.picks)}`:''}`:'<span class="muted">0p</span>';
-    return `${pk} · <b>${r.bans}</b>b <span class="muted">(${r.banned_vs} ${t('subis','vs')})</span>${r.player?`<div class="muted" style="font-size:10px">${esc(r.player)}${r.role?' · '+RN[r.role]:''}</div>`:''}`};
-  pn.append(tableEl([['#','rk'],['Champion'],[t('Présence','Presence'),'num'],[esc(A)],[esc(B)],['Worlds','num'],[t('Verdict','Verdict')]],
-    m.contested.slice(0,14).map((x,i)=>{const tr=el('tr');
+  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Champions contestés — prévisions du modèle et stats','Contested champions — model predictions & stats')}</h3><span class="muted" style="font-size:11px">${t('classés par probabilité d\'apparaître (pick ou ban) dans un game de ce match','ranked by probability of appearing (pick or ban) in a game of this match')}</span></div>`;
+  const A=m.t1,B=m.t2,W=S.W,wn=(W.meta_worlds&&W.meta_worlds.n)||0;
+  const sgn=v=>v==null?'–':(v>=0?'+':'')+v.toFixed(2);
+  const team=(x,key)=>{const r=x[key];
+    const pk=r.picks?`<b>${r.picks}</b>p · ${r.picks>=2?pct(r.wins/r.picks):'–'}`:'<span class="muted">0p</span>';
+    const w=r.w26&&(r.w26.picks||r.w26.bans)?`<div style="font-size:10px;color:var(--accent)">Worlds: ${r.w26.picks}p${r.w26.picks?' ('+r.w26.wins+'W)':''} · ${r.w26.bans}b</div>`:'';
+    return `${pk} · <b>${r.bans}</b>b <span class="muted">(${r.banned_vs} ${t('subis','vs')})</span>${r.player?`<div class="muted" style="font-size:10px">${esc(r.player)}${r.role?' · '+RN[r.role]:''}</div>`:''}${w}`};
+  pn.append(tableEl([['#','rk'],['Champion'],[t('Prévision modèle','Model forecast'),'num'],[t('Pick / ban prévus','Predicted pick / ban')],[`Worlds 2026 (${wn} games)`],[esc(A)+' · '+t('saison','season')],[esc(B)+' · '+t('saison','season')],[t('Valeur draft','Draft value'),'num'],[t('Verdict','Verdict')]],
+    m.contested.slice(0,16).map((x,i)=>{const tr=el('tr'),p=x.pred;
       const tag=x.both?`<span class="pill" style="color:var(--warn);border-color:var(--warn)">${t('contesté par les deux','contested by both')}</span>`:
         (x.a.inv>=x.b.inv?`<span class="pill">${t('priorité','priority')} ${esc(A)}`:`<span class="pill">${t('priorité','priority')} ${esc(B)}`)+'</span>';
-      tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(x.champion)}</td><td class="num"><b>${pct(x.presence)}</b></td><td>${cell(x,'a')}</td><td>${cell(x,'b')}</td><td class="num muted">${pct(x.worlds)}</td><td>${tag}</td>`;return tr})));
-  pn.append(el('div','note',t('Colonnes équipes : p = picks (et win% quand ≥2), b = bans faits, « subis » = bans reçus quand l\'équipe joue. Fenêtre : depuis le 1er mars 2026, pondérée vers le récent.','Team columns: p = picks (win% when ≥2), b = bans made, “vs” = bans received when the team plays. Window: since 2026-03-01, recency-weighted.')));
+      const wl=x.worlds;
+      tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(x.champion)}${x.role?` <span class="tag">${x.role.toUpperCase()}</span>`:''}</td>
+        <td class="num"><b style="font-size:15px">${pct(p.appear)}</b></td>
+        <td style="font-size:11px"><span class="bluet">${esc(A)}</span> ${t('pick','pick')} ${pct(p.pick_a)} · ${t('ban','ban')} ${pct(p.ban_a)}<br><span class="redt">${esc(B)}</span> ${t('pick','pick')} ${pct(p.pick_b)} · ${t('ban','ban')} ${pct(p.ban_b)}</td>
+        <td style="font-size:12px"><b>${wl.picks}</b>p · <b>${wl.bans}</b>b${wl.picks>=2?` · ${pct(wl.wins/wl.picks)} WR`:''}<div class="muted" style="font-size:10px">${t('présence','presence')} ${pct(wl.pres)} · ${t('ligues maj. 60 j','majors 60 d')}: ${x.field.wr!=null?pct(x.field.wr)+' WR':'–'}</div></td>
+        <td>${team(x,'a')}</td><td>${team(x,'b')}</td><td class="num muted">${sgn(x.dv)}</td><td>${tag}</td>`;return tr})));
+  pn.append(el('div','note',t('Prévision = probabilité que le champion soit joué ou banni par l\'une des deux équipes dans un game de ce match (habitudes de pick des joueurs, bans habituels, picks signature de l\'adversaire, meta récente). Stats : p = picks (WR quand ≥2), b = bans faits, « subis » = bans reçus ; en bleu : stats du Worlds 2026 jusqu\'ici. Valeur draft = effet du champion sur la proba de victoire (logit).','Forecast = probability the champion is picked or banned by either team in a game of this match (players\' pick habits, usual bans, the opponent\'s signature picks, recent meta). Stats: p = picks (WR when ≥2), b = bans made, “vs” = bans received; teal: Worlds 2026 stats so far. Draft value = the champion\'s effect on win probability (logit).')));
   return pn;
 }
 function draftOutlook(m){

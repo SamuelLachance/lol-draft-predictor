@@ -160,7 +160,7 @@ def build_profile(team, g, players_by_team, attrs, field):
             e = cnt[ch]; e[0] += wt; e[1] += 1; e[2] += r["win"]; pc[pname(pl)] += wt
         tot = sum(e[0] for e in cnt.values()) or 1
         pool = sorted(cnt.items(), key=lambda kv: -kv[1][0])
-        role_stats[ro] = {"pool": [{"champion": c, "w": round(e[0] / tot, 3), "games": e[1], "wins": int(e[2])} for c, e in pool[:8]],
+        role_stats[ro] = {"pool": [{"champion": c, "w": round(e[0] / tot, 3), "games": e[1], "wins": int(e[2])} for c, e in pool[:14]],
                           "unique": len(cnt), "top3": round(sum(e[0] for _, e in pool[:3]) / tot, 3)}
     P["roles"] = role_stats
     # bans faits / subis ; phase 1 = 3 premiers bans
@@ -252,6 +252,29 @@ def identity_bullets(team, P, field, tm):
         lab = {"allin": T("engage / all-in", "engage / all-in"), "poke": T("poke / contrôle", "poke / control"), "hyper": T("scaling / hypercarry", "scaling / hypercarry")}[top]
         out.append(("comp", T(f"Compositions dominantes : {lab['fr']} (AD {st_['ad']*100:.0f}% / AP {st_['ap']*100:.0f}%).", f"Dominant comp style: {lab['en']} (AD {st_['ad']*100:.0f}% / AP {st_['ap']*100:.0f}%).")))
     return [{"k": k, "t": t} for k, t in out]
+
+
+
+def pick_freq(P, champ):
+    """part (ponderee recence) des games de l'equipe ou `champ` est joue, tous roles confondus."""
+    best, role = 0.0, None
+    for ro in ROLES:
+        for x in P["roles"][ro]["pool"]:
+            if x["champion"] == champ and x["w"] > best:
+                best, role = x["w"], ro
+    return best, role
+
+
+def ban_dist(Pme, Pop):
+    """P(ban de c par `Pme` dans un game) : habitudes de ban + picks signature adverses + bans subis ; somme normalisee a 5 bans."""
+    sc = Counter()
+    for x in Pme["bans_made"]: sc[x["champion"]] += 0.6 * x["rate"]
+    for ro in ROLES:
+        for x in Pop["roles"][ro]["pool"][:4]:
+            sc[x["champion"]] += 0.5 * x["w"] * (1 if x["games"] >= 3 else .4) * Pop["roles"][ro]["top3"]
+    for x in Pop["bans_against"][:8]: sc[x["champion"]] += 0.25 * x["rate"]
+    tot = sum(sc.values()) or 1
+    return {c: min(.95, 5 * v / tot) for c, v in sc.items()}
 
 
 # ------------------------------------------------------------------ proba de match
@@ -453,6 +476,28 @@ def main():
         pf5 = lambda a, b: series_p(game_p(a, b, tm, adj, meta)[0], 5)
         title, semis = knockout_odds(sim["qualified_lists"], pf5)
 
+    # --- stats Worlds 2026 jusqu'ici (tournoi) + meta recente des ligues majeures ---
+    w26 = wl_g[wl_g.date >= "2026-10-01"]
+    w26_picks, w26_bans, w26_wins = Counter(), Counter(), Counter(); team_w26 = {}
+    for r in w26.itertuples():
+        for side, tname in (("blue", r.blue), ("red", r.red)):
+            won = (r.blue_win == 1) == (side == "blue")
+            d = team_w26.setdefault(tname, {"p": Counter(), "w": Counter(), "b": Counter(), "n": 0}); d["n"] += 1
+            for c in getattr(r, f"{side}_picks"):
+                w26_picks[c] += 1; w26_wins[c] += won; d["p"][c] += 1; d["w"][c] += won
+            for c in getattr(r, f"{side}_bans"):
+                w26_bans[c] += 1; d["b"][c] += 1
+    maj = g[g.league.isin(["LCK", "LPL", "LEC", "LCS", "LTA N", "LTA S", "LTA", "LCP", "CBLOL", "MSI", "EWC", "WLDs"]) & (g.date >= g.date.max() - pd.Timedelta(days=60))]
+    field_stats = {}; role_cnt = defaultdict(Counter)
+    for r in maj.itertuples():
+        for side in ("blue", "red"):
+            won = (r.blue_win == 1) == (side == "blue")
+            for i, c in enumerate(getattr(r, f"{side}_picks")):
+                e = field_stats.setdefault(c, {"p": 0, "w": 0}); e["p"] += 1; e["w"] += won; role_cnt[c][ROLES[i]] += 1
+    field_role = {c: cnt.most_common(1)[0][0] for c, cnt in role_cnt.items()}
+    field_top40 = [c for c, _ in field_pres.most_common(40)]
+    pred_agg = defaultdict(list)
+
     # matchs
     out_matches = []
     gby = {k: v for k, v in g[g.league == "WLDs"].groupby("matchid")}
@@ -484,76 +529,60 @@ def main():
             item["pred"] = {"game": round(pg, 4), "series": round(ps, 4), "a_blue": round(pa_blue, 4), "a_red": round(pb_blue_inv, 4),
                             "adj": {"a": round(adj.get(a, 0), 3), "b": round(adj.get(b, 0), 3)}, "factors": factors,
                             "h2h": {"games": int(len(h2h)), "a_wins": hw, "since": "2025-01"}}
-            # --- champions contestes ---
+            # --- champions contestes : stats observees + PREDICTIONS du modele pour CE match ---
             Pa, Pb = profiles.get(a), profiles.get(b)
             if Pa and Pb:
-                cand = Counter()
-                def pres(P_, c):
-                    return 0
-                rows = []
-                allc = set()
+                ban_a = ban_dist(Pa, Pb); ban_b = ban_dist(Pb, Pa)
+                cache = {t_: team_games(g, t_) for t_ in (a, b)}
+                allc = set(field_top40) | {c for c, _ in world_pres.most_common(20)}
                 for P_ in (Pa, Pb):
                     for ro in ROLES:
-                        allc.update(x["champion"] for x in P_["roles"][ro]["pool"][:5])
-                    allc.update(x["champion"] for x in P_["bans_made"][:8]); allc.update(x["champion"] for x in P_["bans_against"][:8])
-                allc.update(c for c, _ in world_pres.most_common(12))
-                def team_pres(team, c):
-                    gs = [r for r in team_games(g, team)]
-                    return gs
-                cache = {}
-                for t in (a, b):
-                    cache[t] = team_games(g, t)
+                        allc.update(x["champion"] for x in P_["roles"][ro]["pool"][:6])
+                    allc.update(x["champion"] for x in P_["bans_made"][:10]); allc.update(x["champion"] for x in P_["bans_against"][:10])
+                rows = []
                 for c in allc:
                     rec = {"champion": c}
-                    for key, t in (("a", a), ("b", b)):
-                        gs = cache[t]; n = max(1, len(gs))
+                    for key, t_, P_ in (("a", a, Pa), ("b", b, Pb)):
+                        gs = cache[t_]; n = max(1, len(gs))
                         pk = [r for r in gs if c in r["picks"]]
                         bn = sum(c in r["bans"] for r in gs); ba = sum(c in r["obans"] for r in gs)
-                        against = [r for r in gs if c in r["opicks"]]
-                        rec[key] = {"picks": len(pk), "wins": sum(r["win"] for r in pk), "bans": bn, "banned_vs": ba, "faced": len(against),
-                                    "n": n, "role": Counter(ROLES[[x for x in range(5)][r["picks"].index(c)]] for r in pk).most_common(1)[0][0] if pk else None}
-                        # joueur principal
+                        faced = sum(c in r["opicks"] for r in gs)
+                        rec[key] = {"picks": len(pk), "wins": sum(r["win"] for r in pk), "bans": bn, "banned_vs": ba, "faced": faced, "n": n,
+                                    "role": Counter(ROLES[r["picks"].index(c)] for r in pk).most_common(1)[0][0] if pk else None}
                         if pk:
-                            pc = Counter(pname(r["players"][r["picks"].index(c)]) for r in pk)
-                            rec[key]["player"] = pc.most_common(1)[0][0]
-                            roster = {pname(x["player"]): x["player"] for x in (tm[t]["roster"] or [])}
-                            rec[key]["player"] = roster.get(rec[key]["player"], rec[key]["player"])
+                            pc_ = Counter(pname(r["players"][r["picks"].index(c)]) for r in pk)
+                            roster = {pname(x["player"]): x["player"] for x in (tm[t_]["roster"] or [])}
+                            rec[key]["player"] = roster.get(pc_.most_common(1)[0][0], pc_.most_common(1)[0][0])
+                        rec[key]["inv"] = round((len(pk) + bn + ba) / n, 3)
+                        tw_ = team_w26.get(t_, {})
+                        rec[key]["w26"] = {"picks": tw_.get("p", Counter())[c], "wins": tw_.get("w", Counter())[c], "bans": tw_.get("b", Counter())[c], "games": tw_.get("n", 0)}
                     fp = field_pres[c] / nrec; wp_ = world_pres[c] / nworld
-                    pa = (rec["a"]["picks"] + rec["a"]["bans"] + rec["a"]["banned_vs"] + rec["a"]["faced"]) / (rec["a"]["n"] + 8) + 0.0
-                    # presence conjointe : proba que c apparaisse (pick ou ban) dans une game de A ou de B (borne par la presence meta)
-                    shrinkA = (rec["a"]["picks"] + rec["a"]["bans"] + rec["a"]["banned_vs"] + rec["a"]["faced"] + 8 * fp) / (rec["a"]["n"] + 8)
-                    shrinkB = (rec["b"]["picks"] + rec["b"]["bans"] + rec["b"]["banned_vs"] + rec["b"]["faced"] + 8 * fp) / (rec["b"]["n"] + 8)
-                    rec["presence"] = round(min(.99, (shrinkA + shrinkB) / 2), 3)
-                    rec["field"] = round(fp, 3); rec["worlds"] = round(wp_, 3)
-                    ctr = (rec["a"]["picks"] / rec["a"]["n"] + rec["b"]["picks"] / rec["b"]["n"]) / 2
-                    rec["score"] = round(rec["presence"] * 0.8 + wp_ * 0.4, 3)
-                    # contesté par les deux = le champion apparait (pick/ban/banni contre) dans >=35% des games de CHAQUE equipe
-                    inv = lambda r_: (r_["picks"] + r_["bans"] + r_["banned_vs"]) / r_["n"]
-                    rec["a"]["inv"] = round(inv(rec["a"]), 3); rec["b"]["inv"] = round(inv(rec["b"]), 3)
+                    # prediction du modele : P(c est pick / ban par chaque equipe dans UN game de ce match)
+                    wa_, ra_ = pick_freq(Pa, c); wb_, rb_ = pick_freq(Pb, c)
+                    pk_a = wa_ * (1 - 0.5 * ban_b.get(c, 0)); pk_b = wb_ * (1 - 0.5 * ban_a.get(c, 0))
+                    if wa_ == 0: pk_a = (rec["a"]["n"] * 0 + 0.35 * fp * 8) / (rec["a"]["n"] + 8)      # jamais joue : lissage vers la meta
+                    if wb_ == 0: pk_b = (rec["b"]["n"] * 0 + 0.35 * fp * 8) / (rec["b"]["n"] + 8)
+                    bn_a, bn_b = ban_a.get(c, 0.0), ban_b.get(c, 0.0)
+                    appear = 1 - (1 - pk_a) * (1 - pk_b) * (1 - bn_a) * (1 - bn_b)
+                    rec["pred"] = {"pick_a": round(pk_a, 3), "pick_b": round(pk_b, 3), "ban_a": round(bn_a, 3), "ban_b": round(bn_b, 3), "appear": round(appear, 3)}
+                    mrole = field_role.get(c) or rec["a"]["role"] or rec["b"]["role"]
+                    rec["role"] = mrole; rec["dv"] = dv["c"].get(f"{mrole}|{c}") if mrole else None
+                    fs = field_stats.get(c, {})
+                    rec["field"] = {"pres": round(fp, 3), "picks": fs.get("p", 0), "wr": round(fs["w"] / fs["p"], 3) if fs.get("p", 0) >= 5 else None}
+                    rec["worlds"] = {"pres": round(wp_, 3), "picks": w26_picks[c], "bans": w26_bans[c], "wins": w26_wins[c], "games": nworld}
+                    rec["presence"] = rec["pred"]["appear"]; rec["score"] = rec["pred"]["appear"]
                     rec["both"] = bool(rec["a"]["inv"] >= .35 and rec["b"]["inv"] >= .35)
                     rows.append(rec)
+                    if not done:
+                        pred_agg[c].append(appear)
                 rows.sort(key=lambda r: -r["score"])
-                item["contested"] = rows[:16]
-                # --- bans probables : habitudes + (picks signature de l'adversaire) ---
-                def ban_targets(me_, op_, Pme, Pop):
-                    sc = Counter()
-                    for x in Pme["bans_made"]: sc[x["champion"]] += 0.6 * x["rate"]
-                    for ro in ROLES:
-                        for x in Pop["roles"][ro]["pool"][:3]:
-                            sc[x["champion"]] += 0.5 * x["w"] * (1 if x["games"] >= 3 else .4) * (Pop["roles"][ro]["top3"])
-                    for x in Pop["bans_against"][:6]: sc[x["champion"]] += 0.25 * x["rate"]
-                    tot = sum(sc.values()) or 1
-                    res = []
-                    for c, v in sc.most_common(8):
-                        res.append({"champion": c, "p": round(min(.95, 5 * v / tot), 3)})
-                    return res
-                item["likely_bans"] = {"a": ban_targets(a, b, Pa, Pb), "b": ban_targets(b, a, Pb, Pa)}
-                # --- picks probables par role ---
+                item["contested"] = rows[:18]
+                item["likely_bans"] = {"a": [{"champion": c, "p": round(p_, 3)} for c, p_ in sorted(ban_a.items(), key=lambda kv: -kv[1])[:8]],
+                                       "b": [{"champion": c, "p": round(p_, 3)} for c, p_ in sorted(ban_b.items(), key=lambda kv: -kv[1])[:8]]}
                 lp = {}
                 for key, P_, t in (("a", Pa, a), ("b", Pb, b)):
                     lp[key] = {}
                     for ro in ROLES:
-                        pl_ = pidx[t].get(ro)
                         ros = next((x["player"] for x in tm[t]["roster"] if x["role"] == ro), None)
                         lp[key][ro] = {"player": ros, "pool": P_["roles"][ro]["pool"][:4], "unique": P_["roles"][ro]["unique"]}
                 item["likely_picks"] = lp
@@ -644,6 +673,13 @@ def main():
     major = g[g.league.isin(["LCK", "LPL", "LEC", "LCS", "LTA N", "LTA S", "LTA", "LCP", "CBLOL", "MSI", "EWC", "WLDs"]) & (g.date >= g.date.max() - pd.Timedelta(days=60))]
     meta_m = agg(major, "60 derniers jours (ligues majeures)")
     dvc = dv["c"]
+    n_up = len({id(m) for m in out_matches if m.get("contested") and m["status"] != "completed"})
+    for M_ in (meta_w, meta_m):          # prediction du modele : presence moyenne attendue dans les matchs a venir (connus)
+        for r_ in M_["rows"]:
+            v = pred_agg.get(r_["champion"])
+            r_["pred"] = round(float(np.mean(v)), 3) if v else None
+            r_["dv"] = dvc.get(f"{r_['role']}|{r_['champion']}") if r_.get("role") else None
+        M_["pred_matches"] = n_up
 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     worlds = {"generated": now, "data_through": meta["data_through"], "rating_adjusted_games": int(len(wg)),

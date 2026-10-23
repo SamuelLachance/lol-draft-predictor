@@ -164,13 +164,15 @@ function worldsView(){
   mp.append(champTable(M.rows.slice(0,12)));wrap.append(mp);
   return wrap;
 }
-function champTable(rows){
+function champTable(rows,predN){
   const dvmap={};state.champions.forEach(c=>dvmap[c.champion+'|'+c.role]=c.dv);
-  return tableEl([['#','rk'],[t('Champion','Champion')],[t('Rôle','Role')],[t('Présence','Presence'),'num'],['Picks','num'],['Bans','num'],['Win%','num'],[t('Valeur draft','Draft value'),'num']],
-    rows.map((r,i)=>{const tr=el('tr'),dv=dvmap[r.champion+'|'+r.role];
+  return tableEl([['#','rk'],[t('Champion','Champion')],[t('Rôle','Role')],[t('Présence','Presence'),'num'],['Picks','num'],['Bans','num'],['Win%','num'],
+    [t('Prévu prochains matchs','Forecast next matches'),'num'],[t('Valeur draft','Draft value'),'num']],
+    rows.map((r,i)=>{const tr=el('tr'),dv=r.dv!=null?r.dv:dvmap[r.champion+'|'+r.role];
       tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(r.champion)}</td><td>${r.role?`<span class="tag">${r.role.toUpperCase()}</span>`:''}</td>
         <td class="num"><b>${pct(r.pres)}</b></td><td class="num">${r.picks}</td><td class="num">${r.bans}</td>
         <td class="num ${r.wr!=null?(r.wr>=.5?'ok':'no'):''}">${r.wr!=null&&r.picks>=3?pct(r.wr):'–'}</td>
+        <td class="num">${r.pred!=null?'<b>'+pct(r.pred)+'</b>':'–'}</td>
         <td class="num muted">${dv!=null?(dv>=0?'+':'')+dv.toFixed(2):'–'}</td>`;return tr}));
 }
 
@@ -236,7 +238,7 @@ function champs(){
   const M=state.cSrc==='worlds'?W.meta_worlds:W.meta_recent;
   const p=panel(`${t('Meta','Meta')} — ${M.since} (${M.n} games)`,bar);
   p.append(champTable(M.rows.slice(0,60)));
-  p.append(el('div','note',t('Présence = % des games où le champion est pick ou ban. Valeur draft : voir « Notes par rôle ».','Presence = % of games where the champion is picked or banned. Draft value: see “Role ratings”.')));
+  p.append(el('div','note',t(`Présence = % des games où le champion est pick ou ban. « Prévu » = probabilité moyenne que le modèle lui donne d'apparaître dans un game des ${M.pred_matches||0} prochains matchs connus.`,`Presence = % of games where the champion is picked or banned. “Forecast” = the model's average probability that it appears in a game of the ${M.pred_matches||0} next known matches.`)));
   wrap.append(p);return wrap;
 }
 function predict(){
