@@ -1,7 +1,7 @@
 """Que valent les synergies, les counters (matchups) et les THEMES de composition ? Ablation walk-forward (refit trimestriel).
 
  variantes du modele de draft : champion seul | + matchups de lane (counters) | + synergies | complet
- themes : engage/all-in, poke/controle, scaling/hypercarry (meme scoring que le draft assistant) -> matrice theme-contre-theme
+ themes : engage/all-in, poke/controle, scaling/hypercarry (scoring par attributs/familles de champions) -> matrice theme-contre-theme
     python ml/exp_draft_parts.py
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ def main():
         print("fit", a.date(), flush=True)
     dm.SCALE.update(old)
     # ---------- themes
-    raw = json.load(open(ROOT / "web" / "public" / "draft" / "data" / "champions.json", encoding="utf-8"))["champions"]
+    raw = json.load(open(ROOT / "ml" / "champion_attrs.json", encoding="utf-8"))["champions"]
     A = {c["name"]: c for c in raw}
     pb = F[[f"blue_{r}" for r in ROLES]].astype(str).values.tolist(); pr = F[[f"red_{r}" for r in ROLES]].astype(str).values.tolist()
     tb = np.array([theme_scores(l, A) for l in pb]); tr = np.array([theme_scores(l, A) for l in pr])

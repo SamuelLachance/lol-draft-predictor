@@ -2,7 +2,7 @@
 import re, subprocess, sys, tempfile, pathlib
 root = pathlib.Path(__file__).parent / "web" / "public"
 bad = 0
-for f in [root / "index.html", root / "match/index.html", root / "draft/index.html", root / "common.js"]:
+for f in [root / "index.html", root / "match/index.html", root / "common.js"]:
     src = f.read_text(encoding="utf-8")
     parts = [src] if f.suffix == ".js" else re.findall(r"<script>(.*?)</script>", src, re.S)
     for i, js in enumerate(parts):

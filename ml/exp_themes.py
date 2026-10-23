@@ -1,6 +1,6 @@
 """Coherence et FIDELITE au theme : une equipe gagne-t-elle plus quand elle draft dans son style / une draft "pure" ?
 
- theme d'une draft = vecteur z-normalise (engage/all-in, poke/controle, scaling/hypercarry) (scoring du draft assistant)
+ theme d'une draft = vecteur z-normalise (engage/all-in, poke/controle, scaling/hypercarry) (scoring par attributs/familles)
  coherence  = ecart entre le theme dominant et le 2e (draft "pure" vs "melangee")
  fidelite   = similarite (cosinus) et distance entre la draft du jour et le theme HABITUEL de l'equipe (moyenne ponderee recence,
               demi-vie 90 j, calculee uniquement sur le passe)
@@ -23,7 +23,7 @@ ROLES = ["top", "jng", "mid", "bot", "sup"]; HL = 90.0
 def main():
     F = pd.read_parquet(PROC / "v4_feats.parquet").merge(pd.read_parquet(PROC / "v4_pbt.parquet"), on="gameid"); F["date"] = pd.to_datetime(F.date)
     F = F[F.league.isin(set(st.GROUP) | st.INTL)].sort_values("date").reset_index(drop=True)
-    A = {c["name"]: c for c in json.load(open(ROOT / "web" / "public" / "draft" / "data" / "champions.json", encoding="utf-8"))["champions"]}
+    A = {c["name"]: c for c in json.load(open(ROOT / "ml" / "champion_attrs.json", encoding="utf-8"))["champions"]}
     pb = F[[f"blue_{r}" for r in ROLES]].astype(str).values.tolist(); pr = F[[f"red_{r}" for r in ROLES]].astype(str).values.tolist()
     tb = np.array([theme_scores(l, A) for l in pb]); tr = np.array([theme_scores(l, A) for l in pr])
     mu = np.nanmean(np.vstack([tb, tr]), 0); sd = np.nanstd(np.vstack([tb, tr]), 0); Zb = (tb - mu) / sd; Zr = (tr - mu) / sd

@@ -47,8 +47,8 @@ def main():
     for lab, df in (("domestique", dom), ("Worlds", wor), ("MSI", T[T.kind == "msi"])):
         g = df[df.sz.abs() > .5]; k = int(((g.sz > 0) == (g.blue_win == 1)).sum()); n = len(g); p = k / n
         print(f"    {lab:11s} {p:.1%}  (n={n}, IC95% +/- {1.96 * np.sqrt(p * (1 - p) / n) * 100:.1f} pts)")
-    # indice alternatif : attributs manuels du draft assistant (scaling 0-3, famille hypercarry)
-    attrs = ft.load_attrs(ROOT / "web" / "public" / "draft" / "data" / "champions.json")
+    # indice alternatif : attributs manuels des champions (scaling 0-3, famille hypercarry)
+    attrs = ft.load_attrs(ROOT / "ml" / "champion_attrs.json")
     def attr_diff(b, r):
         f = lambda l: np.nanmean([attrs[c]["scaling"] if c in attrs else np.nan for c in l])
         return f(b) - f(r)

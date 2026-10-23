@@ -34,7 +34,7 @@ def load():
 
 def main():
     dt, pg = load()
-    attrs = ft.load_attrs(ROOT / "web" / "public" / "draft" / "data" / "champions.json")
+    attrs = ft.load_attrs(ROOT / "ml" / "champion_attrs.json")
     print("games", len(dt), flush=True)
     F = ft.build(dt, pg, attrs, TIER1, st.INTL)
     F = F.merge(dt[["gameid"] + [f"{s}_{r}" for s in ("blue", "red") for r in ROLES]], on="gameid")

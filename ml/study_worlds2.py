@@ -2,7 +2,7 @@
 
 Pour chaque edition Y des Worlds : entrainement sur TOUS les matchs avant le 1er match de l'edition, test sur les games des Worlds Y.
 Definitions du scaling testees (declarees a l'avance, toutes rapportees) :
-  attr   : moyenne de l'attribut manuel 'scaling' (0-3) des 5 picks, bleu - rouge       (draft assistant)
+  attr   : moyenne de l'attribut manuel 'scaling' (0-3) des 5 picks, bleu - rouge       (attributs manuels)
   hyper  : nombre de champions de famille 'hypercarry' ou 'scaling>=3', bleu - rouge
   delta  : indice mesure sur les donnees (effet de la duree) — instable, rappel
 Specifications : base = bt ; +intl-slope (bt x international) ; +X ; +X x Worlds
@@ -26,7 +26,7 @@ def ll(p, y):
 def main():
     H = S.load().merge(pd.read_parquet(PROC / "hist_bt.parquet"), on="gameid"); H = H[(H.date >= "2016-01-01") & H.bt.notna()].copy()
     H = H.merge(pd.read_parquet(PROC / "hist_scal.parquet")[["gameid", "scal"]], on="gameid")
-    attrs = json.load(open(ROOT / "web" / "public" / "draft" / "data" / "champions.json", encoding="utf-8"))["champions"]
+    attrs = json.load(open(ROOT / "ml" / "champion_attrs.json", encoding="utf-8"))["champions"]
     A = {c["name"]: c for c in attrs}
     f_attr = lambda l: np.nanmean([A[c]["scaling"] if c in A else np.nan for c in l])
     f_hyp = lambda l: sum(1 for c in l if c in A and (A[c]["family"] == "hypercarry" or A[c]["scaling"] >= 3))

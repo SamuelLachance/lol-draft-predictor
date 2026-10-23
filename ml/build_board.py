@@ -69,7 +69,7 @@ def main():
         for r,x in zip(ROLES,ncc):CR[getattr(row,f"red_{r}")]=x
 
     # ---- modele v4 : variables causales (forme, h2h, maitrise...) + BT equipe/joueur + draft, stack walk-forward ----
-    attrs = ft.load_attrs(ROOT / "web" / "public" / "draft" / "data" / "champions.json")
+    attrs = ft.load_attrs(ROOT / "ml" / "champion_attrs.json")
     dt["playoffs"] = dt.playoffs.fillna(0) if "playoffs" in dt.columns else 0
     F = ft.build(dt, pg, attrs, TIER1, INTL)
     G = pd.DataFrame({"gameid": gid, "date": dt._date.values, "league": dt.league.values, "blue": dt.blue_team.astype(str).values,

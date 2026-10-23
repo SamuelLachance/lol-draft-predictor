@@ -10,7 +10,6 @@
   <div class="logo">LP</div>
   <div><h1>LoL Esports Predictor</h1><div class="sub" id="sub">…</div></div>
   <div class="spacer"></div>
-  <a class="tab" href="draft/" style="text-decoration:none;line-height:1.1" id="draftLink"></a>
   <span id="hbtn"></span>
 </header>
 
@@ -48,7 +47,6 @@ async function boot(){
 }
 function shell(){
   $('#hbtn').innerHTML='';$('#hbtn').append(LP.langBtn(),' ',LP.themeBtn());
-  $('#draftLink').textContent='🎯 Draft Assistant';
   const tabs=$('#tabs');tabs.innerHTML='';
   TABS().forEach(([k,l])=>{const b=el('button','tab'+(k===state.view?' on':''),l);b.dataset.v=k;
     b.onclick=()=>{state.view=k;history.replaceState(null,'','#tab='+k);[...tabs.children].forEach(x=>x.classList.toggle('on',x===b));render()};tabs.append(b)});

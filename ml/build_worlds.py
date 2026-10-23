@@ -3,7 +3,7 @@
 Entrees (toutes dans web/public/ ou data/, donc rejouable toutes les ~10 min en CI) :
   data/worlds_schedule.json  calendrier/resultats (ml/fetch_rich.py)
   data/games_rich.parquet    games pro avec picks/bans/objectifs
-  web/public/data/{teams,players,meta}.json, web/public/model/draft_v2.json, web/public/draft/data/champions.json
+  web/public/data/{teams,players,meta}.json, web/public/model/draft_v2.json, ml/champion_attrs.json
 Sortie : web/public/data/worlds.json  (+ live.json = version legere pour le polling navigateur)
 
     python ml/build_worlds.py
@@ -65,7 +65,7 @@ def load():
     players = json.load(open(DATA / "players.json", encoding="utf-8"))
     meta = json.load(open(DATA / "meta.json", encoding="utf-8"))
     dv = json.load(open(WEB / "model" / "draft_v2.json", encoding="utf-8"))
-    attrs = {c["name"]: c for c in json.load(open(WEB / "draft" / "data" / "champions.json", encoding="utf-8"))["champions"]}
+    attrs = {c["name"]: c for c in json.load(open(ROOT / "ml" / "champion_attrs.json", encoding="utf-8"))["champions"]}
     sched = json.load(open(ROOT / "data" / "worlds_schedule.json", encoding="utf-8"))
     g = pd.read_parquet(ROOT / "data" / "games_rich.parquet")
     for c in ("blue_picks", "red_picks", "blue_bans", "red_bans", "blue_players", "red_players"):
@@ -111,7 +111,7 @@ def wavg(vals, ws):
 
 
 def style_of(champs, attrs):
-    """scores d'identite (meme logique que le draft assistant) -> allin / poke / hyper (+ AD/AP, mobilite)."""
+    """scores d'identite (logique par attributs/familles de champions) -> allin / poke / hyper (+ AD/AP, mobilite)."""
     allin = poke = hyper = ad = ap = n = 0.0
     mob = eng = cc = 0.0
     for c in champs:
@@ -133,7 +133,7 @@ _TN = {}
 
 
 def theme_vec(champs, attrs):
-    """scores bruts (engage/all-in, poke/controle, scaling/hypercarry) d'une draft — meme scoring que le draft assistant."""
+    """scores bruts (engage/all-in, poke/controle, scaling/hypercarry) d'une draft — scoring par attributs/familles de champions."""
     al = po = hy = n = 0.0
     for c in champs:
         a = attrs.get(c)

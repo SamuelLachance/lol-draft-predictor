@@ -45,7 +45,7 @@ Test hors échantillon (walk-forward, 7 329 matchs majeurs 2024-2026, refit trim
 
 Ablation hors échantillon (walk-forward, 7 329 matchs 2024-2026 ; `ml/exp_draft_parts.py`, `ml/exp_themes.py`) :
 - **Modèle de draft par composants** : champions seuls −0,0014 de log-loss, + counters (matchups de lane) −0,0015, + synergies −0,0011, complet −0,0012 (aucun écart significatif entre eux) → les synergies et les counters **n'ajoutent rien** à la valeur propre du champion.
-- **Thèmes** (engage/all-in, poke/contrôle, scaling/hypercarry, scoring du draft assistant) : winrate brut ≈ 50 % pour chacun ; matrice thème-contre-thème à force d'équipe égale ±1,4 pt, intervalles à cheval sur 0 ; ajout au stack : +0,0004 (sans gain).
+- **Thèmes** (engage/all-in, poke/contrôle, scaling/hypercarry, scoring par attributs/familles de champions) : winrate brut ≈ 50 % pour chacun ; matrice thème-contre-thème à force d'équipe égale ±1,4 pt, intervalles à cheval sur 0 ; ajout au stack : +0,0004 (sans gain).
 - **Cohérence d'une draft** (écart entre thème dominant et second) et **fidélité d'une équipe à son thème habituel** (cosinus avec son profil récent, demi-vie 90 j) : coefficients ≈ 0 à force égale (−0,005 [−0,04 ; +0,03] ; Worlds/MSI +0,065 [−0,07 ; +0,20]), aucun gain hors échantillon ; l'équipe la plus fidèle à son thème gagne 49,2 % des games.
 Ces éléments restent affichés **à titre d'analyse** : onglet Meta → « Synergies & counters » (explorateur par champion) et, sur chaque page de match, le thème dominant, la répartition des thèmes, le winrate par thème et la fidélité de chaque équipe.
 
@@ -88,7 +88,7 @@ En local (IP résidentielle) : `update_board.ps1` fait la même chose et déploi
 ## Site local
 
 ```bash
-cd web/public && python -m http.server 8765      # site statique : index.html, match/, draft/
+cd web/public && python -m http.server 8765      # site statique : index.html, match/
 ```
 
 (`web/src` = ancienne appli Next.js, non utilisée par le site publié.)
