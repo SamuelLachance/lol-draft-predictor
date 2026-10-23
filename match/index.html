@@ -24,7 +24,7 @@ window.addEventListener('error',e=>{const v=document.getElementById('view');if(v
 const {$,el,esc,pct,t,tx}=LP;
 const ROLES=['top','jng','mid','bot','sup'];
 const RN={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Support'};
-const S={liveSim:null,liveKey:'',W:null,slug:'',ev:null,details:null,win:null,es:[],winAt:0};
+const S={dv:null,live:null,hist:[],histId:null,liveSim:null,liveKey:'',W:null,slug:'',ev:null,details:null,win:null,es:[],winAt:0};
 const ea=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
 const cur=()=>S.W&&S.W.matches.find(m=>m.slug===S.slug);
 const PRED=m=>{const l=S.liveSim&&S.liveSim.pred[m.slug];return l&&m.pred?Object.assign({},m.pred,{series:l.series,game:l.game,live:true}):m.pred};
@@ -38,12 +38,13 @@ async function recompute(){
 async function pollEs(){const m=cur();if(!m)return;
   try{S.es=await LP.esSchedule();const ev=LP.findEvent(m,S.es);S.ev=ev;recompute();
     if(ev&&(ev.state==='inProgress'||(ev.state==='completed'&&!S.details))){S.details=await LP.esDetails(ev.match.id)}
-    renderTop();renderLiveBlock()}catch(e){}}
+    paint()}catch(e){}}
 async function pollLive(){const m=cur();if(!m||!S.ev||S.ev.state!=='inProgress')return;
   try{S.details=await LP.esDetails(S.ev.match.id);
     const g=(S.details.match.games||[]).find(x=>x.state==='inProgress');
     if(g){const w=await LP.liveWindow(g.id);if(w){S.win={game:g,w};S.winAt=Date.now()}}
-    renderLiveBlock()}catch(e){}}
+    paint()}catch(e){}}
+function paint(){renderLiveBlock();renderTop();LP.hydrate($('#top'))}
 async function pollAll(){await pollEs();pollLive()}
 
 function render(){
@@ -64,7 +65,7 @@ function render(){
     v.append(el('div','panel',`<div class="pbody">${t('Les équipes de ce match ne sont pas encore connues (ou hors modèle). La page se complétera automatiquement dès que le tableau est fixé.','The teams for this match aren\'t known yet (or are outside the model). The page fills in automatically once the bracket is set.')}</div>`));
     if(m.games&&m.games.length)v.append(gamesPanel(m));
   }
-  renderTop();renderLiveBlock();LP.hydrate(v);countdown();
+  paint();LP.hydrate(v);countdown();
 }
 function status(){
   const m=cur();let st=m.status==='completed'?'completed':'unstarted',s1=m.s1,s2=m.s2;
@@ -73,6 +74,21 @@ function status(){
     const w=ts.map(x=>x.result?x.result.gameWins:null);if(w[0]!=null){s1=f?w[1]:w[0];s2=f?w[0]:w[1]}}
   return {st,s1,s2};
 }
+const sig=z=>1/(1+Math.exp(-z)),lgt=p=>Math.log(p/(1-p));
+// P(t1 gagne la série) sachant le score et la proba de chaque game restant ; pcur = proba du game en cours (optionnel)
+function seriesFrom(m,s1,s2,p,pcur){
+  const need=(m.bo>>1)+1,S_=(a,b)=>a<=0?1:b<=0?0:p*S_(a-1,b)+(1-p)*S_(a,b-1);
+  const a=need-(s1||0),b=need-(s2||0);
+  return pcur==null?S_(a,b):pcur*S_(a-1,b)+(1-pcur)*S_(a,b-1);
+}
+function seriesNow(m){
+  const {st,s1,s2}=status(),p=PRED(m),L=S.live;
+  if(!p)return null;
+  if(st==='completed')return null;
+  if(L&&st==='inProgress')return {v:seriesFrom(m,+s1||0,+s2||0,p.game,L.pT1),live:true,game:L.pT1};
+  if(st==='inProgress'||(+s1||0)+(+s2||0)>0)return {v:seriesFrom(m,+s1||0,+s2||0,p.game),live:false};
+  return {v:p.series,live:!!p.live};
+}
 function renderTop(){
   const m=cur();if(!m)return;const top=$('#top');if(!top)return;const {st,s1,s2}=status(),ts=LP.utc(m.date);
   const known=m.t1&&m.t2;
@@ -80,15 +96,27 @@ function renderTop(){
   $('#title').textContent=known?`${m.t1} vs ${m.t2}`:t('Match à déterminer','Match TBD');
   $('#sub').textContent=`Worlds 2026 · ${m.stage==='Play-In'?'Play-In':'Swiss / Main Event'} · ${m.round||''} · Bo${m.bo}`;
   const chip=st==='inProgress'?'<span class="chip live">● LIVE</span>':st==='completed'?`<span class="chip done">${t('Terminé','Final')}</span>`:`<span class="chip up">${LP.fmtDay(ts)} · ${LP.fmtTime(ts)}</span>`;
-  const p=PRED(m);
-  const A=m.t1,B=m.t2;
-  top.innerHTML=`<div class="panel hl"><div class="hero">
-    <div style="flex:1;min-width:140px;text-align:right"><div class="big ${st==='completed'&&Number(s1)<Number(s2)?'muted':''}">${A?LPC.team(A,{b:false}):'TBD'}</div></div>
-    <div style="text-align:center"><div class="big" style="font-variant-numeric:tabular-nums">${s1==null?'–':s1} : ${s2==null?'–':s2}</div><div>${chip}</div><div class="muted" style="font-size:11px" id="cd"></div></div>
-    <div style="flex:1;min-width:140px"><div class="big ${st==='completed'&&Number(s2)<Number(s1)?'muted':''}">${B?LPC.team(B,{b:false}):'TBD'}</div></div>
-    ${p?`<div style="flex-basis:100%"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-weight:900;font-size:clamp(1.4rem,2.6vw,2.4rem);font-variant-numeric:tabular-nums"><span class="bluet">${pct(p.series,1)}</span><span class="muted" style="font-size:.8rem;font-weight:600;text-align:center">${t('probabilité de gagner la série (avant draft)','series win probability (pre-draft)')}${p.live?' · <b style="color:var(--accent)">● '+t('recalculée en direct','recomputed live')+'</b>':''}</span><span class="redt">${pct(1-p.series,1)}</span></div><div class="wpbar" style="margin:8px 0 0"><span style="width:${p.series*100}%"></span></div></div>
-    <div class="facts" style="flex:1 1 100%">${(p.factors||[]).slice(0,5).map(f=>`<div class="fact"><div class="k">${esc(tx(f.t))}</div><div class="v"><span class="bluet">${esc(f.a==null?'–':f.a)}</span><span class="redt">${esc(f.b==null?'–':f.b)}</span></div></div>`).join('')}</div>`:''}
-    ${m.stream?`<div style="flex-basis:100%;text-align:center"><a href="${ea(m.stream)}" target="_blank" rel="noopener">▶ ${t('Regarder le match','Watch the match')}</a></div>`:''}
+  const p=PRED(m),L=S.live,sn=seriesNow(m);
+  const A=m.t1,B=m.t2,done=st==='completed',n1=Number(s1),n2=Number(s2);
+  const sd=side=>side?`<div class="hside"><i class="sq ${side==='blue'?'b':'r'}"></i>${side==='blue'?t('côté bleu','blue side'):t('côté rouge','red side')}</div>`:'';
+  const win1=done&&n1>n2,win2=done&&n2>n1;
+  let body='';
+  if(sn){
+    const v=sn.v,fv=v>=0.5?1:2;
+    const cap=sn.live?`<b style="color:var(--accent)">● ${L?t('Série recalculée en direct (game en cours + score)','Series recomputed live (current game + score)'):t('recalculée en direct','recomputed live')}</b>`:t('Probabilité de gagner la série (avant draft)','Series win probability (pre-draft)');
+    body=`<div class="hteam L ${fv===1?'fv':''}"><div class="hname ${win2?'muted':''}">${A?LPC.team(A,{b:false}):'TBD'}</div><div class="hpct">${pct(v,1)}</div>${sd(L&&L.side1)}${fv===1?`<span class="chip fav">★ ${t('favori','favorite')}</span>`:''}</div>
+    <div class="hmid"><div class="hscore">${s1==null?'–':s1} : ${s2==null?'–':s2}</div><div>${chip}</div><div class="muted" style="font-size:11px" id="cd"></div></div>
+    <div class="hteam R ${fv===2?'fv':''}"><div class="hname ${win1?'muted':''}">${B?LPC.team(B,{b:false}):'TBD'}</div><div class="hpct">${pct(1-v,1)}</div>${sd(L&&L.side2)}${fv===2?`<span class="chip fav">★ ${t('favori','favorite')}</span>`:''}</div>
+    <div class="hbar"><span style="width:${v*100}%"></span></div>
+    <div class="hcap">${cap}${L?` · ${t('game en cours','current game')} : <b class="bluet">${pct(L.pT1,0)}</b> – <b class="redt">${pct(1-L.pT1,0)}</b>`:''}</div>`;
+  }else{
+    body=`<div class="hteam L"><div class="hname ${win2?'muted':''}">${A?LPC.team(A,{b:false}):'TBD'}</div></div>
+    <div class="hmid"><div class="hscore">${s1==null?'–':s1} : ${s2==null?'–':s2}</div><div>${chip}</div><div class="muted" style="font-size:11px" id="cd"></div></div>
+    <div class="hteam R"><div class="hname ${win1?'muted':''}">${B?LPC.team(B,{b:false}):'TBD'}</div></div>`;
+  }
+  top.innerHTML=`<div class="panel hl"><div class="hero2">${body}
+    ${p?`<div class="facts" style="grid-column:1/-1">${(p.factors||[]).slice(0,5).map(f=>`<div class="fact"><div class="k">${esc(tx(f.t))}</div><div class="v"><span class="bluet">${esc(f.a==null?'–':f.a)}</span><span class="redt">${esc(f.b==null?'–':f.b)}</span></div></div>`).join('')}</div>`:''}
+    ${m.stream?`<div style="grid-column:1/-1;text-align:center"><a href="${ea(m.stream)}" target="_blank" rel="noopener">▶ ${t('Regarder le match','Watch the match')}</a></div>`:''}
   </div></div>`;
 }
 function countdown(){const m=cur(),c=$('#cd');if(!m||!c)return;const {st}=status();if(st!=='unstarted'){c.textContent='';return}
@@ -96,30 +124,132 @@ function countdown(){const m=cur(),c=$('#cd');if(!m||!c)return;const {st}=status
   const h=Math.floor(d/3.6e6),mi=Math.floor(d%3.6e6/6e4),s=Math.floor(d%6e4/1e3);c.textContent=t('Début dans ','Starts in ')+(h?h+'h ':'')+String(mi).padStart(2,'0')+'m '+String(s).padStart(2,'0')+'s'}
 
 // ---------- bloc live (API lolesports) ----------
+const ROLE_OF={top:'top',jungle:'jng',mid:'mid',bottom:'bot',support:'sup'};
+const SYN=[['top','jng'],['jng','mid'],['mid','bot'],['bot','sup'],['jng','sup'],['mid','sup'],['jng','bot']];
+// or d'equipe moyen -> minutes de jeu (le flux livestats n'expose pas l'horloge : estimation, +-1-2 min)
+const GOLD_T=[[2500,0],[9500,5],[17500,10],[28500,15],[40000,20],[52000,25],[63000,30],[74000,35],[85000,40],[96000,45],[107000,50]];
+function estMin(g){if(g<=GOLD_T[0][0])return 0;for(let i=1;i<GOLD_T.length;i++){const [g1,t1]=GOLD_T[i],[g0,t0]=GOLD_T[i-1];if(g<=g1)return t0+(t1-t0)*(g-g0)/(g1-g0)}return 50+(g-107000)/2200}
+// modele de draft v2 : avantage (logit, point de vue bleu) + contributions detaillees
+function draftEval(B,R){
+  const dv=S.dv;if(!dv||B.length<5||R.length<5||B.some(x=>!x)||R.some(x=>!x))return null;
+  let e=0;const items=[],cv={b:[],r:[]};
+  ROLES.forEach((r,i)=>{const a=B[i],b=R[i],ca=dv.c[r+'|'+a]||0,cb=dv.c[r+'|'+b]||0;e+=ca-cb;cv.b[i]=ca;cv.r[i]=cb;
+    if(ca)items.push({v:ca,side:'b',label:a});if(cb)items.push({v:-cb,side:'r',label:b});
+    const lo=a<=b?a:b,hi=a<=b?b:a,mv=(a===lo?1:-1)*(dv.m[r+'|'+lo+'|'+hi]||0);
+    if(mv){e+=mv;items.push({v:mv,side:mv>0?'b':'r',label:a+' vs '+b,kind:'m'})}});
+  SYN.forEach(([r1,r2])=>{const i=ROLES.indexOf(r1),j=ROLES.indexOf(r2);
+    const sb=dv.s[r1+'|'+r2+'|'+B[i]+'|'+B[j]]||0,sr=dv.s[r1+'|'+r2+'|'+R[i]+'|'+R[j]]||0;e+=sb-sr;
+    if(sb)items.push({v:sb,side:'b',label:B[i]+' + '+B[j],kind:'s'});if(sr)items.push({v:-sr,side:'r',label:R[i]+' + '+R[j],kind:'s'})});
+  items.sort((x,y)=>Math.abs(y.v)-Math.abs(x.v));
+  return {edge:e,items:items.slice(0,6),cv};
+}
+// P(equipe bleue gagne un game) avec les VRAIS cotes ; edge = avantage de draft (logit) ou null (avant draft)
+function sidedP(bt,rt,which,edge){
+  const W=S.W,R=W.ratings;if(!R||!R[bt]||!R[rt])return null;const bl=W.model.blend,f=SIM.feats(bt,rt,R,bl,W.h2h||{});
+  if(edge!=null)f.draft=edge;return sig(SIM.zscore(bl[which],f));
+}
+// proba live : prior (ratings + draft) qui s'estompe avec le temps + ecart d'or + objectifs. Heuristique (non calibree sur series temporelles).
+function liveProb(p0,tmin,fb,fr){
+  const z0=lgt(Math.min(.97,Math.max(.03,p0))),w=Math.exp(-tmin/45);
+  const gd=(fb.totalGold-fr.totalGold)/1000,zg=gd*(0.15+0.5*Math.exp(-tmin/18));
+  const dr=a=>(a||[]).length,soul=a=>dr(a)>=4?0.5:0;
+  const zo=0.07*(fb.towers-fr.towers)+0.08*(dr(fb.dragons)-dr(fr.dragons))+(soul(fb.dragons)-soul(fr.dragons))+0.3*(fb.barons-fr.barons)+0.35*((fb.inhibitors||0)-(fr.inhibitors||0));
+  const pp=sig(z0*w),pg=sig(z0*w+zg),pa=sig(z0*w+zg+zo);
+  return {p:Math.min(.99,Math.max(.01,pa)),prior:pp,gold:pg-pp,obj:pa-pg};
+}
+function computeLive(m){
+  if(!S.win||!m.t1||!m.t2)return null;
+  const {game,w}=S.win,f=w.frames[w.frames.length-1],md=w.gameMetadata,bt=md.blueTeamMetadata,rt=md.redTeamMetadata;
+  const tn=id=>{const x=(S.ev.match.teams||[]).find(y=>y.id===id);return x?x.name:'?'};
+  const nB=tn(bt.esportsTeamId),nR=tn(rt.esportsTeamId);
+  const t1blue=LP.sameTeam(nB,m.t1)||LP.sameTeam(nR,m.t2)?true:LP.sameTeam(nR,m.t1)||LP.sameTeam(nB,m.t2)?false:true;
+  const bTeam=t1blue?m.t1:m.t2,rTeam=t1blue?m.t2:m.t1;
+  const champs=meta=>ROLES.map((r,i)=>{const p=meta.participantMetadata.find(x=>ROLE_OF[x.role]===r)||meta.participantMetadata[i];return p?LP.champName(p.championId):null});
+  const cb=champs(bt),cr=champs(rt),de=draftEval(cb,cr);
+  const pre=sidedP(bTeam,rTeam,'pre',null),post=sidedP(bTeam,rTeam,'post',de?de.edge:null);
+  const base=post!=null?post:pre!=null?pre:0.5;
+  const tmin=estMin((f.blueTeam.totalGold+f.redTeam.totalGold)/2);
+  const lv=liveProb(base,tmin,f.blueTeam,f.redTeam);
+  const flip=x=>t1blue?x:1-x;
+  // historique (persistant par game, pour la courbe)
+  if(S.histId!==game.id){S.histId=game.id;S.hist=[];try{S.hist=JSON.parse(sessionStorage.getItem('lp_h_'+game.id)||'[]')}catch(e){}}
+  const last=S.hist[S.hist.length-1],pT1=flip(lv.p);
+  if(!last||tmin>last.t+0.15){S.hist.push({t:+tmin.toFixed(2),p:+pT1.toFixed(4)});if(S.hist.length>400)S.hist.shift();try{sessionStorage.setItem('lp_h_'+game.id,JSON.stringify(S.hist))}catch(e){}}
+  const old=[...S.hist].reverse().find(o=>o.t<=tmin-2);
+  return {game,f,md,bt,rt,nB,nR,t1blue,side1:t1blue?'blue':'red',side2:t1blue?'red':'blue',cb,cr,de,tmin,lv,pT1,
+    pPre:pre!=null?flip(pre):null,pPost:post!=null?flip(post):null,delta:old?pT1-old.p:null,bTeam,rTeam};
+}
+function spark(h,A,B){
+  if(h.length<2)return `<div class="muted" style="font-size:12px">${t('La courbe se construit au fil des mises à jour (toutes les 10 s).','The chart builds up with each update (every 10 s).')}</div>`;
+  const W_=320,H_=84,P=4,tm=Math.max(10,h[h.length-1].t),x=v=>P+(W_-2*P)*v/tm,y=p=>P+(H_-2*P)*(1-p);
+  const pts=h.map(o=>x(o.t).toFixed(1)+','+y(o.p).toFixed(1)).join(' '),l=h[h.length-1];
+  return `<div class="sparkw"><span class="bluet">${esc(A)} ↑</span><span class="redt">${esc(B)} ↓</span></div><svg viewBox="0 0 ${W_} ${H_}" class="spark"><line x1="${P}" x2="${W_-P}" y1="${y(.5)}" y2="${y(.5)}" stroke="var(--line2)" stroke-dasharray="4 4"/><polyline fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round" points="${pts}"/><circle cx="${x(l.t).toFixed(1)}" cy="${y(l.p).toFixed(1)}" r="3.6" fill="var(--accent)"/></svg><div class="sparkw"><span>0'</span><span>~${Math.round(tm)}'</span></div>`;
+}
 function renderLiveBlock(){
-  const b=$('#liveblock');if(!b)return;const m=cur();if(!m)return;
+  const b=$('#liveblock');const m=cur();if(!b||!m)return;
+  S.live=null;
   if(!S.ev||S.ev.state!=='inProgress'||!S.win){b.innerHTML=S.ev&&S.ev.state==='inProgress'?`<div class="panel"><div class="phead"><h3><span class="livedot hot"></span>${t('En direct','Live')}</h3></div><div class="pbody muted">${t('Draft / chargement du game en cours… les données de jeu apparaissent ~1 min après le début (délai officiel du flux).','Draft / game loading… in-game data appears ~1 min after the start (official feed delay).')}</div></div>`:'';return}
-  const {game,w}=S.win,f=w.frames[w.frames.length-1],md=w.gameMetadata;
-  const bt=md.blueTeamMetadata,rt=md.redTeamMetadata;
-  const teamName=id=>{const x=(S.ev.match.teams||[]).find(y=>y.id===id);return x?x.name:'?'};
-  const nB=teamName(bt.esportsTeamId),nR=teamName(rt.esportsTeamId);
-  const gd=f.blueTeam.totalGold-f.redTeam.totalGold;
+  const L=S.live=computeLive(m);if(!L){b.innerHTML='';return}
+  const {game,f,bt,rt,t1blue,de,lv,pT1}=L;
+  const sideOf=left=>(left===t1blue)?'blue':'red';        // left=true -> equipe 1
+  const FA=t1blue?f.blueTeam:f.redTeam,FB=t1blue?f.redTeam:f.blueTeam,MA=t1blue?bt:rt,MB=t1blue?rt:bt;
+  const A=m.t1,B=m.t2,dr=a=>(a||[]).length;
+  const gd=FA.totalGold-FB.totalGold;
+  const sdc=s=>`<i class="sq ${s==='blue'?'b':'r'}"></i>${s==='blue'?t('côté bleu','blue side'):t('côté rouge','red side')}`;
+  const arrow=L.delta==null?'':Math.abs(L.delta)<0.005?'':`<span class="${L.delta>0?'bluet':'redt'}" style="font-size:.8rem">${L.delta>0?'▲':'▼'} ${Math.abs(L.delta*100).toFixed(1)} pts / 2 min ${t('pour','for')} ${esc(L.delta>0?A:B)}</span>`;
+  const sn=seriesNow(m);
+  const brk=`<div class="brk"><span class="pill">${t('Départ (ratings + draft)','Start (ratings + draft)')} ${pct(flipP(lv.prior),0)}</span><span class="pill">${t('Or','Gold')} ${sgnPts(flipD(lv.gold))}</span><span class="pill">${t('Objectifs','Objectives')} ${sgnPts(flipD(lv.obj))}</span></div>`;
+  function flipP(x){return t1blue?x:1-x}
+  function flipD(x){return t1blue?x:-x}
+  function sgnPts(x){return (x>=0?'+':'')+(x*100).toFixed(1)+' pts'}
   const rowsFor=(meta,fr)=>meta.participantMetadata.map(p=>{const s=fr.participants.find(x=>x.participantId===p.participantId)||{};
-    const nm=LP.champName(p.championId);
-    return `<div class="plrow">${LP.champ(nm,{noname:true})}<span><b>${LPC.player(String(p.summonerName).replace(/^\S+\s/,''),p.role==='jungle'?'jng':p.role==='bottom'?'bot':p.role==='support'?'sup':p.role)}</b> <span class="muted">${esc(nm)} · ${t('niv.','lv.')} ${s.level||'?'}</span></span><span class="kda">${s.kills}/${s.deaths}/${s.assists} · ${s.creepScore||0} CS · ${((s.totalGold||0)/1000).toFixed(1)}k</span></div>`}).join('');
-  const dr=a=>(a||[]).length;
-  b.innerHTML=`<div class="panel"><div class="phead"><h3><span class="livedot hot"></span>${t('En direct — game','Live — game')} ${game.number}</h3><span class="muted" style="font-size:11px">${t('mis à jour','updated')} ${LP.ago(S.winAt)} · ${f.gameState}</span></div>
+    const nm=LP.champName(p.championId),ro=ROLE_OF[p.role]||p.role;
+    return `<div class="plrow">${LP.champ(nm,{noname:true})}<span><b>${LPC.player(String(p.summonerName).replace(/^\S+\s/,''),ro)}</b> <span class="muted">${esc(nm)} · ${t('niv.','lv.')} ${s.level||'?'}</span></span><span class="kda">${s.kills}/${s.deaths}/${s.assists} · ${s.creepScore||0} CS · ${((s.totalGold||0)/1000).toFixed(1)}k</span></div>`}).join('');
+  const k1=FA.totalKills,k2=FB.totalKills;
+  b.innerHTML=`<div class="panel hl"><div class="phead"><h3><span class="livedot hot"></span>${t('En direct — game','Live — game')} ${game.number}</h3><span class="chip up">≈ ${Math.floor(L.tmin)}:${String(Math.floor(L.tmin%1*60)).padStart(2,'0')} ${t('(estimé)','(est.)')}</span><span class="muted" style="font-size:11px;margin-left:auto">${t('mis à jour','updated')} ${LP.ago(S.winAt)} · ${f.gameState}</span></div>
     <div class="pbody">
-      <div class="glive"><div class="tm bluet">${LPC.team(nB,{b:false})}</div><div class="st">${f.blueTeam.totalKills} – ${f.redTeam.totalKills}</div><div class="tm redt" style="text-align:right">${LPC.team(nR,{b:false})}</div></div>
-      <div class="kv" style="justify-content:center;margin:10px 0">
-        <div><div class="k">${t('Écart d\'or','Gold lead')}</div><div class="v ${gd>=0?'bluet':'redt'}">${gd>=0?nB:nR} +${(Math.abs(gd)/1000).toFixed(1)}k</div></div>
-        <div><div class="k">${t('Tours','Towers')}</div><div class="v">${f.blueTeam.towers} – ${f.redTeam.towers}</div></div>
-        <div><div class="k">${t('Dragons','Dragons')}</div><div class="v">${dr(f.blueTeam.dragons)} – ${dr(f.redTeam.dragons)}</div></div>
-        <div><div class="k">Barons</div><div class="v">${f.blueTeam.barons} – ${f.redTeam.barons}</div></div>
+      <div class="lv">
+        <div class="lvt L"><div class="tm bluet">${LPC.team(A,{b:false})}</div><div class="hside">${sdc(sideOf(true))}</div></div>
+        <div class="lvs">${k1} <span class="muted">–</span> ${k2}<div class="muted" style="font-size:.62rem;letter-spacing:.5px">KILLS</div></div>
+        <div class="lvt R"><div class="tm redt">${LPC.team(B,{b:false})}</div><div class="hside">${sdc(sideOf(false))}</div></div>
       </div>
-      <div class="pl"><div>${rowsFor(bt,f.blueTeam)}</div><div>${rowsFor(rt,f.redTeam)}</div></div>
+      <div class="sec">${t('Probabilité de victoire du game en direct','Live win probability — this game')}</div>
+      <div class="lvp"><span class="bluet">${pct(pT1,1)}</span><span class="lvd">${arrow}</span><span class="redt">${pct(1-pT1,1)}</span></div>
+      <div class="hbar" style="margin:6px 0 10px"><span style="width:${pT1*100}%"></span></div>
+      ${brk}
+      ${sn?`<div class="muted" style="font-size:12px;margin:8px 0">${t('Série','Series')} Bo${m.bo} : <b class="bluet">${esc(A)} ${pct(sn.v,1)}</b> · <b class="redt">${esc(B)} ${pct(1-sn.v,1)}</b></div>`:''}
+      ${spark(S.hist||[],A,B)}
+      <div class="sec">${t('Comparatif en jeu','In-game comparison')}</div>
+      ${cmp(t('Or total','Total gold'),FA.totalGold,FB.totalGold,x=>(x/1000).toFixed(1)+'k')}
+      ${cmp('Kills',k1,k2,x=>x)}${cmp(t('Tours','Towers'),FA.towers,FB.towers,x=>x)}${cmp(t('Dragons','Dragons'),dr(FA.dragons),dr(FB.dragons),x=>x)}${cmp('Barons',FA.barons,FB.barons,x=>x)}${cmp(t('Inhibiteurs','Inhibitors'),FA.inhibitors||0,FB.inhibitors||0,x=>x)}
+      <div class="muted" style="text-align:center;font-size:12px;margin:6px 0">${t('Écart d\'or','Gold lead')} : <b class="${gd>=0?'bluet':'redt'}">${gd>=0?A:B} +${(Math.abs(gd)/1000).toFixed(1)}k</b></div>
+      ${draftLive(L,m)}
+      <div class="sec">${t('Joueurs','Players')}</div>
+      <div class="pl"><div>${rowsFor(MA,FA)}</div><div>${rowsFor(MB,FB)}</div></div>
+      <div class="note" style="padding-left:0;padding-right:0">${t('Proba live = heuristique : départ (ratings + valeur de draft du modèle) qui s\'estompe avec le temps + écart d\'or pondéré selon la phase de jeu + objectifs (tours, dragons, baron, inhibiteurs). Non calibrée sur des séries temporelles : à lire comme une tendance. L\'horloge est estimée à partir de l\'or total (le flux ne la donne pas).','Live probability is a heuristic: a starting point (ratings + the model\'s draft value) that fades with time + gold lead weighted by game phase + objectives (towers, dragons, baron, inhibitors). Not calibrated on time series: read it as a trend. The clock is estimated from total gold (the feed does not provide it).')}</div>
     </div></div>`;
   LP.hydrate(b);
+}
+// qui a la meilleure draft ? (picks reels du game en cours, valeur du modele de draft v2)
+function draftLive(L,m){
+  const de=L.de;if(!de)return `<div class="sec">${t('Draft','Draft')}</div><div class="muted" style="font-size:12px">${t('Valeur de draft indisponible (modèle non chargé ou picks incomplets).','Draft value unavailable (model not loaded or incomplete picks).')}</div>`;
+  const A=m.t1,B=m.t2,t1b=L.t1blue,e1=t1b?de.edge:-de.edge;
+  const pts=L.pPost!=null&&L.pPre!=null?(L.pPost-L.pPre)*100:e1*0.25*(S.W.model.blend.post.draft||0.3)*100;
+  const best=pts>=0?A:B,cls=pts>=0?'bluet':'redt',big=Math.abs(pts)>=1.5;
+  const wd=(S.W.model.blend.post.draft)||0.3;
+  const rows=ROLES.map((r,i)=>{
+    const cA=t1b?de.cv.b[i]:de.cv.r[i],cB=t1b?de.cv.r[i]:de.cv.b[i],nmA=t1b?L.cb[i]:L.cr[i],nmB=t1b?L.cr[i]:L.cb[i];
+    const metaA=t1b?L.bt:L.rt,metaB=t1b?L.rt:L.bt;
+    const pl=(meta)=>{const p=meta.participantMetadata.find(x=>ROLE_OF[x.role]===r)||meta.participantMetadata[i];return p?String(p.summonerName).replace(/^\S+\s/,''):''};
+    const v=x=>`<span class="${x>=0.02?'ok':x<=-0.02?'no':'muted'}">${x>=0?'+':''}${(x*wd*25).toFixed(1)}</span>`;
+    return `<div class="dr"><div class="dl">${LP.champ(nmA,{noname:1})}<span><b>${esc(nmA)}</b> <span class="muted">${esc(pl(metaA))}</span></span>${v(cA)}</div><div class="drr"><span class="tag">${RN[r]}</span></div><div class="dl R">${v(cB)}<span style="text-align:right"><b>${esc(nmB)}</b> <span class="muted">${esc(pl(metaB))}</span></span>${LP.champ(nmB,{noname:1})}</div></div>`}).join('');
+  const key=de.items.slice(0,4).map(it=>{const team=it.side==='b'?L.bTeam:L.rTeam,left=team===A,own=(it.side==='b'?it.v:-it.v)*wd*25;
+    return `<span class="pill ${left?'bluet':'redt'}">${esc(it.label)}${it.kind==='m'?' ⚔':it.kind==='s'?' ⚯':''} · ${esc(team)} <span class="${own>=0?'ok':'no'}">${own>=0?'+':''}${own.toFixed(1)}</span></span>`}).join(' ');
+  return `<div class="sec">${t('Qui a la meilleure draft ?','Who has the better draft?')}</div>
+    <div class="dverdict"><b class="${cls}" style="font-size:1.05rem">${big?'':t('Léger avantage — ','Slight edge — ')}${esc(best)}</b> <span class="muted">${t('a la meilleure draft','has the better draft')}</span> · <b class="${cls}">+${Math.abs(pts).toFixed(1)} pts</b> ${t('de proba de gagner le game','win probability')}${L.pPre!=null&&L.pPost!=null?` <span class="muted">(${esc(A)} ${pct(L.pPre,1)} ${t('avant draft','pre-draft')} → <b>${pct(L.pPost,1)}</b> ${t('après draft','post-draft')})</span>`:''}</div>
+    <div class="dhead"><span class="bluet">${esc(A)}</span><span class="muted">${t('valeur du champion (pts de win% sur le game)','champion value (win% pts for the game)')}</span><span class="redt">${esc(B)}</span></div>
+    ${rows}
+    <div style="margin-top:8px;font-size:12px" class="muted">${t('Facteurs clés','Key factors')} : ${key||'–'}</div>`;
 }
 
 // ---------- probas ----------
@@ -157,18 +287,35 @@ function tableEl(head,rows){const s=el('div','scroll'),tb=el('table');
 
 // ---------- games joués ----------
 function gamesPanel(m){
-  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Games joués — drafts et résultats','Games played — drafts & results')}</h3></div>`;
+  const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Games joués — drafts et résultats','Games played — drafts & results')}</h3><span class="muted" style="font-size:11px">${t('équipe 1 toujours à gauche, côté de jeu indiqué','team 1 always on the left, in-game side shown')}</span></div>`;
   const b=el('div','pbody');
-  m.games.forEach(g=>{
+  // une draft = qui est a gauche (equipe 1 du match), qui a la meilleure draft selon le modele, et si elle a gagne
+  const info=g=>{
+    const flip=!!m.t1&&!LP.sameTeam(g.blue,m.t1)&&LP.sameTeam(g.red,m.t1);       // equipe 1 jouee cote rouge
+    const p=g.p,dpts=p?(p.post-p.pre)*100:null;                                      // point de vue bleu
+    const bestBlue=dpts==null?null:dpts>=0;
+    return {flip,dpts,bestBlue,bestWon:bestBlue==null?null:bestBlue===!!g.blue_win};
+  };
+  const I=m.games.map(info),withD=I.filter(x=>x.dpts!=null);
+  if(withD.length){
+    const won=withD.filter(x=>x.bestWon).length;
+    const sum1=m.games.reduce((a,g,i)=>a+(I[i].dpts==null?0:(I[i].flip?-I[i].dpts:I[i].dpts)),0);
+    const lead=sum1>=0?m.t1:m.t2;
+    b.append(el('div','dsum',`${t('Bilan des drafts','Draft summary')} : <b class="${sum1>=0?'bluet':'redt'}">${esc(lead)}</b> ${t('a eu la meilleure draft cumulée','had the better cumulative draft')} (${sum1>=0?'+':''}${sum1.toFixed(1)} pts) · ${t('la meilleure draft a gagné','the better draft won')} <b>${won}/${withD.length}</b> ${t('games','games')}`));
+  }
+  m.games.forEach((g,gi)=>{
+    const {flip,dpts,bestBlue,bestWon}=I[gi];
     const w=g.blue_win?g.blue:g.red,mins=g.length?Math.floor(g.length/60)+':'+String(g.length%60).padStart(2,'0'):'';
-    const dr=(picks,players,cls)=>`<div class="draftrow">${picks.map((c,i)=>`<div class="pk"><div class="muted" style="font-size:10px">${RN[ROLES[i]]}</div>${LP.champ(c,{lg:1,noname:1})}<div><b>${esc(c)}</b></div><div class="muted">${players[i]?LPC.player(players[i],ROLES[i]):''}</div></div>`).join('')}</div>`;
-    const bans=a=>a.map(c=>LP.champ(c,{ban:1,noname:1})).join(' ');
-    const p=g.p;
+    const side=s=>`<span class="hside" style="display:inline-flex"><i class="sq ${s==='blue'?'b':'r'}"></i>${s==='blue'?t('côté bleu','blue side'):t('côté rouge','red side')}</span>`;
+    const col=(sd,cls)=>{const isB=sd==='blue',team=isB?g.blue:g.red,picks=isB?g.blue_picks:g.red_picks,pl=isB?g.blue_players:g.red_players,bn=isB?g.blue_bans:g.red_bans,won=isB?g.blue_win:!g.blue_win;
+      const dr=`<div class="draftrow">${picks.map((c,i)=>`<div class="pk"><div class="muted" style="font-size:10px">${RN[ROLES[i]]}</div>${LP.champ(c,{lg:1,noname:1})}<div><b>${esc(c)}</b></div><div class="muted">${pl[i]?LPC.player(pl[i],ROLES[i]):''}</div></div>`).join('')}</div>`;
+      const mine=dpts==null?null:(isB?dpts:-dpts);
+      return `<div><div class="${cls}"><b>${LPC.team(team,{b:false})}</b> ${side(sd)} ${won?'<span class="chip fav">✔ '+t('victoire','win')+'</span>':''}${mine!=null&&mine>0?`<span class="chip up" title="${t('meilleure draft selon le modèle','better draft according to the model')}">🧠 ${t('meilleure draft','better draft')} +${mine.toFixed(1)}</span>`:''}</div>${dr}<div class="muted" style="font-size:11px">Bans ${bn.map(c=>LP.champ(c,{ban:1,noname:1})).join(' ')}</div></div>`};
+    const L_=flip?'red':'blue',R_=flip?'blue':'red';
     const d=el('div');d.style.cssText='margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--line)';
-    d.innerHTML=`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><b>Game ${g.n}</b><span class="chip fav">${esc(w)} ${t('gagne','wins')}</span><span class="muted">${mins} · ${g.kills[0]}-${g.kills[1]} kills · ${t('or','gold')} ${(g.gold[0]/1000).toFixed(1)}k/${(g.gold[1]/1000).toFixed(1)}k · ${t('tours','towers')} ${g.towers[0]}-${g.towers[1]} · drag ${g.dragons[0]}-${g.dragons[1]} · baron ${g.barons[0]}-${g.barons[1]}</span>${g.vod?`<a href="${ea(g.vod)}" target="_blank" rel="noopener">VOD ▶</a>`:''}</div>
-      <div class="two"><div><div class="bluet"><b>${LPC.team(g.blue,{b:false})}</b> <span class="muted">(${t('bleu','blue')})</span></div>${dr(g.blue_picks,g.blue_players)}<div class="muted" style="font-size:11px">Bans ${bans(g.blue_bans)}</div></div>
-      <div><div class="redt"><b>${LPC.team(g.red,{b:false})}</b> <span class="muted">(${t('rouge','red')})</span></div>${dr(g.red_picks,g.red_players)}<div class="muted" style="font-size:11px">Bans ${bans(g.red_bans)}</div></div></div>
-      ${p?`<div class="muted" style="font-size:12px;margin-top:6px">${t('Modèle','Model')} : ${esc(g.blue)} ${pct(p.pre,1)} ${t('avant draft','pre-draft')} → <b>${pct(p.post,1)}</b> ${t('après draft','post-draft')} (${t('avantage de draft','draft edge')} <b class="${g.draft_edge>=0?'bluet':'redt'}">${g.draft_edge>=0?'+':''}${g.draft_edge.toFixed(2)}</b> ${g.draft_edge>=0?t('bleu','blue'):t('rouge','red')}) ${g.draft_top&&g.draft_top[0]?` · ${t('pick clé','key pick')} : ${esc(g.draft_top[0].champion)} (${g.draft_top[0].side==='blue'?t('bleu','blue'):t('rouge','red')})`:''}</div>`:''}`;
+    d.innerHTML=`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><b>Game ${g.n}</b><span class="chip fav">${esc(w)} ${t('gagne','wins')}</span><span class="muted">${mins} · ${flip?g.kills[1]+'-'+g.kills[0]:g.kills[0]+'-'+g.kills[1]} kills · ${t('or','gold')} ${(g.gold[flip?1:0]/1000).toFixed(1)}k/${(g.gold[flip?0:1]/1000).toFixed(1)}k · ${t('tours','towers')} ${flip?g.towers[1]+'-'+g.towers[0]:g.towers[0]+'-'+g.towers[1]} · drag ${flip?g.dragons[1]+'-'+g.dragons[0]:g.dragons[0]+'-'+g.dragons[1]} · baron ${flip?g.barons[1]+'-'+g.barons[0]:g.barons[0]+'-'+g.barons[1]}</span>${g.vod?`<a href="${ea(g.vod)}" target="_blank" rel="noopener">VOD ▶</a>`:''}</div>
+      <div class="two">${col(L_,'bluet')}${col(R_,'redt')}</div>
+      ${g.p?`<div class="muted" style="font-size:12px;margin-top:6px">${t('Modèle','Model')} : ${esc(g.blue)} ${pct(g.p.pre,1)} ${t('avant draft','pre-draft')} → <b>${pct(g.p.post,1)}</b> ${t('après draft','post-draft')} (${t('avantage de draft','draft edge')} <b class="${g.draft_edge>=0?'bluet':'redt'}">${g.draft_edge>=0?'+':''}${g.draft_edge.toFixed(2)}</b> ${g.draft_edge>=0?esc(g.blue):esc(g.red)}) ${g.draft_top&&g.draft_top[0]?` · ${t('pick clé','key pick')} : ${esc(g.draft_top[0].champion)} (${esc(g.draft_top[0].side==='blue'?g.blue:g.red)})`:''}${bestWon!=null?` · <b class="${bestWon?'ok':'no'}">${bestWon?t('la meilleure draft a gagné','better draft won'):t('la meilleure draft a perdu','better draft lost')}</b>`:''}</div>`:''}`;
     b.append(d)});
   b.append(el('div','note',t('Probabilités « modèle » des games déjà joués : ratings du dernier build (qui peut inclure ces games) — indicatif, pas hors-échantillon.','“Model” probabilities for games already played use ratings from the latest build (which may include these games) — indicative, not out-of-sample.')));
   pn.append(b);return pn;
@@ -212,7 +359,7 @@ function draftOutlook(m){
 
 // ---------- identité de jeu ----------
 function cmp(label,a,b,fmt,hi=true,maxv){
-  if(a==null||b==null)return '';const mx=maxv||Math.max(a,b,1e-9)*1.25,aw=a/(a+b||1)*100;
+  if(a==null||b==null)return '';const mx=maxv||Math.max(a,b,1e-9)*1.25,aw=a+b>0?a/(a+b)*100:50;
   const wa=hi?a>b:a<b,wb=hi?b>a:b<a;
   return `<div class="cmp"><div class="l"><b class="${wa?'win':''}">${fmt(a)}</b></div><div class="m">${label}<div class="hb"><div class="a" style="width:${aw}%"></div><div class="b" style="width:${100-aw}%"></div></div></div><div><b class="${wb?'win':''}">${fmt(b)}</b></div></div>`;
 }
@@ -277,11 +424,12 @@ async function boot(){
     const get=f=>LP.json(f).catch(()=>[]);
     const [teams,players,regions]=await Promise.all(['teams','players','regions'].map(get));
     S.W=await LP.json('worlds',true);
+    fetch('../model/draft_v2.json').then(r=>r.json()).then(d=>{S.dv=d;if(S.win)paint()}).catch(()=>{});
     LPC.init({teams,players,regions,worlds:S.W});
   }catch(e){$('#view').innerHTML='<div class="err">⚠ '+esc(e.message)+'</div>';return}
   render();
   document.addEventListener('lp:lang',()=>{render()});
-  window.addEventListener('hashchange',()=>{S.slug=decodeURIComponent(location.hash.slice(1));S.ev=null;S.details=null;S.win=null;render();pollAll()});
+  window.addEventListener('hashchange',()=>{S.slug=decodeURIComponent(location.hash.slice(1));S.ev=null;S.details=null;S.win=null;S.live=null;S.hist=[];S.histId=null;render();pollAll()});
   pollAll();setInterval(pollAll,20000);setInterval(pollLive,10000);setInterval(countdown,1000);
 }
 boot();
