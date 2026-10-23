@@ -33,6 +33,18 @@ Probabilités bien calibrées à tous les niveaux de confiance (60 % annoncé �
 ### Pourquoi pas 75-80 % ?
 Un match pro est très bruité : avec uniquement l'information d'avant-match, ~65 % est proche du plafond. Je l'ai testé : un LightGBM sur ~60 variables causales (meta glissante par champion×rôle, attributs de composition — engage, CC, mobilité, poke, scaling, frontline, AD/AP —, repos/charge, série, TrueSkill par rôle, Elo séquentiel…) fait **moins bien** que le stack linéaire ci-dessus (0.636 vs 0.628) ; ces variables n'apportent rien une fois la force d'équipe connue (`ml/eval_v4.py`, `ml/exp_stack.py`). La draft seule vaut ~54 %. Les probabilités qui dépassent nettement 70 % ne viennent donc que d'écarts de niveau réels entre équipes. La sélection des variables s'est faite sur la même période de test : prévoir ~0.1-0.2 pt de moins en conditions réelles.
 
+## Études spécifiques aux Worlds (résultats négatifs, documentés)
+
+Toutes reproductibles (`ml/fetch_history.py` puis `ml/study_scaling.py`, `ml/study_worlds.py`, `ml/study_worlds2.py`, `ml/study_intl.py`) sur 42 000 games pro 2014-2026 avec durée et compositions.
+
+**Théorie « aux Worlds le scaling gagne beaucoup plus souvent »** — verdict : **non démontrée, et sans gain pour le modèle.**
+- Les games de Worlds ne sont pas plus longues : écart moyen −0,02 min vs LCK/LPL/LEC/LCS la même année (plus longues 5 éditions sur 10). Les équipes ne draftent pas plus de scaling aux Worlds (écart de score de scaling : +0,002).
+- Indice de scaling *mesuré* (effet de la durée sur le winrate de chaque champion, ridge, à force d'équipe égale, estimé hors des games testées) : valide (l'équipe la plus « scaling » gagne 44 % des games < 28 min et 53 % des > 38 min en domestique) mais **instable d'une époque à l'autre** (corrélation 0,06 entre ≤2021 et ≥2022). Effet aux Worlds +0,075 logit/écart-type [−0,05 ; +0,24] contre −0,02 en domestique : supplément non significatif.
+- Avec l'attribut « scaling » (0-3) écrit à la main : effet significatif en rétrospectif (Worlds +0,14/écart-type [+0,01 ; +0,32] ; 2021-2025 : +0,32 [+0,10 ; +0,51] ; domestique ≈ 0 ; l'équipe la plus « scaling » gagne 53,8 % ±4,4 aux Worlds contre 49,4 % en domestique). Mais l'effet change de signe selon l'édition (négatif 2016-2018, positif 2019-2025 sauf 2024) et 7 sous-ensembles ont été regardés : à prendre comme un indice, pas une preuve.
+- **Test hors échantillon** (9 éditions, 726 games, entraînement uniquement sur le passé) : ajouter le scaling (attribut, hypercarry, indice mesuré ; seul ou × Worlds) ne change pas le log-loss (−0,0007 [−0,005 ; +0,003] au mieux). Rien n'a été ajouté au modèle.
+
+**Autres diagnostics Worlds** : côté bleu 54,0 % aux Worlds (55,3 % sur 2021-2025) vs 53,3 % en domestique (déjà capté par le biais de side) ; le favori gagne 65,8 % aux Worlds vs 62,7 % en domestique. Une pente de calibration < 1 (favoris surestimés) apparaît sur MSI/play-ins avec l'ancien Bradley-Terry seul, mais **disparaît dans le stack de production** (ajouter un terme « × international » dégrade de 0,01 de log-loss) : pas de correction spécifique.
+
 ## Pipeline
 
 ```bash

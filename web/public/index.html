@@ -22,6 +22,7 @@
 
 <script src="common.js"></script>
 <script src="sim.js"></script>
+<script src="cards.js"></script>
 <script>
 const {$,el,esc,pct,t,tx}=LP;
 const ROLES=['top','jng','mid','bot','sup'];
@@ -40,12 +41,7 @@ async function boot(){
   fetch('model/draft_v2.json').then(r=>r.json()).then(d=>state.dv=d).catch(()=>{});
   buildIndexes();
   shell(); cards(); render();
-  document.body.addEventListener('click',e=>{
-    const pl=e.target.closest('[data-player]'),tm=e.target.closest('[data-team]');
-    if(pl)openCard({type:'player',name:pl.dataset.player,role:pl.dataset.role});
-    else if(tm)openCard({type:'team',name:tm.dataset.team});
-  });
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+  LPC.init({teams:state.teams,players:state.players,regions:state.regions,worlds:state.worlds});
   document.addEventListener('lp:lang',()=>{shell();cards();render()});
   if(location.hash.startsWith('#tab=')){const v=location.hash.slice(5);if(TABS().some(x=>x[0]===v)){state.view=v;shell();render()}}
   poll(); setInterval(poll,30000); setInterval(tickStatus,15000);
@@ -61,7 +57,6 @@ function shell(){
     `Model: inter-league team strength (league-offset Bradley-Terry) + roster TrueSkill + draft value, validated <i>walk-forward</i> (monthly refits, no leakage). Draft alone explains very little of a pro game; it nudges the probability, it doesn't set it. Data: Leaguepedia, Oracle's Elixir, lolesports API. Esports analysis, not betting advice.`);
 }
 function buildIndexes(){
-  state.modalStack=[];
   state.tidx=Object.fromEntries(state.teams.map(x=>[x.team,x]));
   state.pidx={};state.players.forEach(p=>state.pidx[p.player+'|'+p.role]=p);
   state.regidx=Object.fromEntries((state.regions||[]).map(r=>[r.region,r]));
@@ -97,7 +92,7 @@ async function recompute(){
 async function poll(){
   try{state.es=await LP.esSchedule();state.esAt=Date.now()}catch(e){}
   try{const l=await LP.json('live',true);
-    if(!state.worlds||l.version!==state.worlds.generated){state.worlds=await LP.json('worlds',true)}}catch(e){}
+    if(!state.worlds||l.version!==state.worlds.generated){state.worlds=await LP.json('worlds',true);LPC.update({worlds:state.worlds})}}catch(e){}
   await recompute();
   tickStatus();if(state.view==='worlds'&&!$('#modal')?.style.display.includes('grid'))render();
 }
@@ -133,8 +128,8 @@ function matchCard(m){
   const p=lp?lp.series:(m.pred?m.pred.series:null);
   const stk=lst||m.stakes;
   a.innerHTML=`<div class="top"><span>${esc(m.stage==='Play-In'?'Play-In':'Swiss')} · ${esc(m.round||'')}</span><span>Bo${m.bo}</span><span style="margin-left:auto">${chip}</span></div>
-    <div class="tr ${w2?'lose':''}"><span>${known?esc(m.t1):t('À déterminer','TBD')}</span><span class="sc">${s1==null?'':s1}</span></div>
-    <div class="tr ${w1?'lose':''}"><span>${known?esc(m.t2):t('À déterminer','TBD')}</span><span class="sc">${s2==null?'':s2}</span></div>
+    <div class="tr ${w2?'lose':''}"><span>${known?LPC.team(m.t1,{b:false}):t('À déterminer','TBD')}</span><span class="sc">${s1==null?'':s1}</span></div>
+    <div class="tr ${w1?'lose':''}"><span>${known?LPC.team(m.t2,{b:false}):t('À déterminer','TBD')}</span><span class="sc">${s2==null?'':s2}</span></div>
     ${p!=null?`<div class="pb"><span style="width:${p*100}%"></span></div><div class="ft"><span>${pct(p)}</span><span>${t('victoire (série)','series win')}</span><span>${pct(1-p)}</span></div>`:''}
     ${stk?`<div class="ft"><span>${t('Qualif.','Qualif.')} ${pct(stk.qual_now.a)}</span><span>${stk.records.a} · ${stk.records.b}</span><span>${pct(stk.qual_now.b)}</span></div>`:''}`;
   return a;
@@ -301,74 +296,6 @@ function predict(){
   selA.onchange=go;selB.onchange=go;selBo.onchange=go;wrap.append(row,draftToggle,draftBox,out);p.append(wrap);go();return p;
 }
 
-// ============ fiches (clic sur un joueur / une équipe) ============
-function pctileOf(role,stat,v){const a=(state.roleStats[role]||{})[stat];if(!a||!a.length||v==null)return .5;let lo=0;for(const x of a)if(x<v)lo++;return lo/a.length}
-const barColor=p=>p>=.6?'var(--fav)':p>=.35?'var(--warn)':'var(--bad)';
-function segRow(lbl,val,frac,color){const r=el('div','brow');
-  r.innerHTML=`<span class="lbl">${lbl}</span><span class="val" style="color:${color}">${val}</span>`;
-  const bar=el('div','bar'),sp=el('span');sp.style.width=Math.max(2,Math.min(100,frac*100))+'%';sp.style.background=color;
-  bar.append(sp);r.append(bar);return r}
-function miniTiles(pairs){const w=el('div','mini');pairs.forEach(([k,v])=>{const d=el('div','t');d.innerHTML=`<div class="k">${k}</div><div class="v">${v}</div>`;w.append(d)});return w}
-function closeModal(){const m=$('#modal');if(m)m.style.display='none';state.modalStack=[]}
-function openCard(ref,push){
-  if(push!==false)state.modalStack.push(ref);
-  let m=$('#modal');
-  if(!m){m=el('div','modal-bg');m.id='modal';document.body.append(m);m.addEventListener('click',e=>{if(e.target===m)closeModal()})}
-  m.innerHTML='';const sheet=el('div','sheet');
-  sheet.append(ref.type==='player'?playerCard(ref.name,ref.role):teamCard(ref.name));
-  m.append(sheet);m.style.display='grid';m.scrollTop=0;LP.hydrate(m);
-}
-function backBtn(){const b=el('button','mx','‹');b.onclick=()=>{state.modalStack.pop();const prev=state.modalStack[state.modalStack.length-1];prev?openCard(prev,false):closeModal()};return b}
-function closeX(){const b=el('button','mx','✕');b.style.marginLeft='auto';b.onclick=closeModal;return b}
-function mtable(head,rows){const mt=el('div','mt');mt.append(tableEl(head,rows));return mt}
-function playerCard(name,role){
-  const p=state.pidx[name+'|'+role],wrap=el('div');
-  if(!p){wrap.append(el('div','mhead',`<h2>${esc(name)}</h2>`),el('div','mbody',t('Pas de données détaillées.','No detailed data.')));return wrap}
-  const h=el('div','mhead');if(state.modalStack.length>1)h.append(backBtn());
-  h.append(el('h2',null,esc(p.player)),el('span','tag',role.toUpperCase()));
-  const tl=el('span','tag lnk');tl.dataset.team=p.team;tl.textContent=p.team;h.append(tl);
-  h.append(el('span','tag',p.league),closeX());
-  const b=el('div','mbody');
-  b.append(el('div',null,`<div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px">Rating</div><div class="rtg" style="font-size:30px">${p.rating.toFixed(1)}</div>`));
-  b.append(el('div','sec',t('Construction du rating','How the rating is built')));
-  const mag=Math.max(Math.abs(p.c_ind),Math.abs(p.c_team),8);
-  b.append(segRow(t('Individuel','Individual'),(p.c_ind>=0?'+':'')+p.c_ind.toFixed(1),Math.abs(p.c_ind)/mag,p.c_ind>=0?'var(--gold)':'var(--bad)'));
-  b.append(segRow(t('Contexte équipe','Team context'),(p.c_team>=0?'+':'')+p.c_team.toFixed(1),Math.abs(p.c_team)/mag,p.c_team>=0?'var(--accent)':'var(--bad)'));
-  b.append(miniTiles([['Winrate',pct(p.wr)],[t('Bilan','Record'),`${p.wins}-${p.losses}`],['KP',pct(p.kp)],['KDA',p.kda]]));
-  b.append(el('div','sec',t('vs pairs du rôle (percentile)','vs role peers (percentile)')));
-  [['GD@15','gd15',p.gd15],['Dmg share','dmg',p.dmg],['KP','kp',p.kp],['KDA','kda',p.kda]].forEach(([lbl,s,v])=>{
-    const pc=pctileOf(role,s,v),disp=s==='gd15'?((v>0?'+':'')+v):(s==='dmg'||s==='kp')?pct(v):v;
-    b.append(segRow(lbl,disp,pc,barColor(pc)));});
-  if(p.champs&&p.champs.length){b.append(el('div','sec',t('Pool de champions','Champion pool')));
-    b.append(mtable([['Champion'],['G','num'],['WR','num'],['KDA','num']],
-      p.champs.map(c=>{const tr=el('tr');tr.innerHTML=`<td>${LP.champ(c.champion)}</td><td class="num">${c.games}</td><td class="num">${pct(c.wr)}</td><td class="num">${c.kda}</td>`;return tr})));}
-  if(p.recent&&p.recent.length){b.append(el('div','sec',t('Dernières games','Recent games')));
-    b.append(mtable([['Date'],['Champion'],['R'],['K/D/A','num'],['GD@15','num'],['vs']],
-      p.recent.map(g=>{const tr=el('tr');tr.innerHTML=`<td class="muted">${g.date}</td><td>${LP.champ(g.champion)}</td><td class="${g.win?'ok':'no'}">${g.win?'W':'L'}</td><td class="num">${g.k}/${g.d}/${g.a}</td><td class="num">${g.gd15>0?'+':''}${g.gd15}</td><td><span class="lnk" data-team="${ea(g.opp)}">${esc(g.opp)}</span></td>`;return tr})));}
-  wrap.append(h,b);return wrap;
-}
-function teamCard(name){
-  const x=state.tidx[name],wrap=el('div');
-  if(!x){wrap.append(el('div','mhead',`<h2>${esc(name)}</h2>`),el('div','mbody',t('Équipe hors des ligues majeures actives : pas de fiche.','Team outside the active major leagues: no card.')));return wrap}
-  const h=el('div','mhead');if(state.modalStack.length>1)h.append(backBtn());
-  h.append(el('h2',null,esc(x.team)),el('span','tag',x.league),el('span','tag',x.region),el('span','muted',`${x.wins}-${x.losses} · ${pct(x.wr)}`),closeX());
-  const b=el('div','mbody');
-  b.append(miniTiles([['Power',x.power],['Raw Elo',x.elo],['Roster TS',x.ts_mu!=null?x.ts_mu:'–'],['L10',x.form]]));
-  b.append(el('div','sec',t('Power = niveau de la ligue + écart de l\'équipe','Power = league level + team deviation')));
-  b.append(el('div','muted',`<span style="font-size:11px">${x.region} ${(state.regidx[x.region]||{}).rating||''} (${x.lg_off>=0?'+':''}${x.lg_off}) ${x.dev>=0?'+':'−'} ${Math.abs(x.dev)} = <b style="color:var(--gold)">${x.power}</b></span>`));
-  const W=state.worlds,pr=W&&W.profiles&&W.profiles[x.team];
-  if(pr&&pr.bullets&&pr.bullets.length){b.append(el('div','sec',t('Identité de jeu','Playstyle')));
-    b.append(el('ul','bul',pr.bullets.map(u=>`<li>${esc(tx(u.t))}</li>`).join('')))}
-  if(x.roster&&x.roster.length){b.append(el('div','sec',t('Roster','Roster')));
-    b.append(mtable([['Role'],[t('Joueur','Player')],['Rating','num'],['KP','num'],['KDA','num']],
-      x.roster.map(m=>{const pp=state.pidx[m.player+'|'+m.role],tr=el('tr');
-        tr.innerHTML=`<td><span class="tag">${m.role.toUpperCase()}</span></td><td><b class="lnk" data-player="${ea(m.player)}" data-role="${m.role}">${esc(m.player)}</b></td><td class="rtg num">${pp?pp.rating.toFixed(1):'–'}</td><td class="num">${pp?pct(pp.kp):'–'}</td><td class="num">${pp?pp.kda:'–'}</td>`;return tr})));}
-  if(x.matches&&x.matches.length){b.append(el('div','sec',t('Derniers matchs (pick du modèle vs résultat)','Recent matches (model pick vs result)')));
-    b.append(mtable([['Date'],[t('Match','Match')],[t('Modèle','Model')],[t('Rés.','Res')],[t('OK','Hit')]],
-      x.matches.map(m=>{const tr=el('tr'),ok=(m.pred>=.5)===(m.win===1);
-        tr.innerHTML=`<td class="muted">${m.date}</td><td><span class="lnk" data-team="${ea(m.opp)}">${esc(m.opp)}</span> <span class="muted" style="font-size:10px">(${m.side})</span></td><td><span class="chip fav">${pct(m.pred)}</span></td><td class="${m.win?'ok':'no'}">${m.win?'W':'L'}</td><td class="${ok?'ok':'no'}">${ok?'✓':'✗'}</td>`;return tr})));}
-  wrap.append(h,b);return wrap;
-}
 boot();
 </script>
 </body></html>
