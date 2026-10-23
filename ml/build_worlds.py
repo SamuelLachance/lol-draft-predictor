@@ -9,7 +9,8 @@ Sortie : web/public/data/worlds.json  (+ live.json = version legere pour le poll
     python ml/build_worlds.py
 """
 from __future__ import annotations
-import json, math, random, re, sys, unicodedata
+import json, math, os, random, re, sys, unicodedata
+from concurrent.futures import ProcessPoolExecutor
 from collections import defaultdict, Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +26,7 @@ RL = {"top": "Top", "jng": "Jungle", "mid": "Mid", "bot": "Bot", "sup": "Support
 SINCE = pd.Timestamp("2026-03-01")           # fenetre des profils d'equipe
 HALF = 75.0                                   # demi-vie (jours) du poids de recence des profils
 K_LIVE = 0.10                                 # ajustement du rating (logit) par game jouee depuis le dernier build complet
-N_SIM, N_COND = 4000, 1500
+N_SIM = int(os.environ.get("LP_SIMS", 100000))     # simulations du Swiss + quarts (parallelisees sur tous les coeurs)
 RNG = random.Random(26)
 
 
@@ -401,18 +402,22 @@ def draw_pairs(grp, played, rng):
     return rec(g)
 
 
-def simulate_swiss(teams16, results, fixtures_by_round, pf, n_sims, force=None, rng=RNG, past=None):
-    """fixtures_by_round[N] = [(a,b,bo,winner|None)] pour les matchs DEJA connus (joues ou programmes).
-    past = ensemble de frozenset((a,b)) deja joues (anti-revanche). force=(a,b,winner) impose un match a venir."""
+def simulate_swiss(teams16, fixtures_by_round, pf, n_sims, rng=RNG, watch=None):
+    """fixtures_by_round[N] = [(a,b,bo,winner|None[,slug])] pour les matchs DEJA connus (joues ou programmes).
+    watch = {slug: (a, b)} : matchs a venir dont on veut la qualification de a et b CONDITIONNELLEMENT au vainqueur (lue dans la meme simulation).
+    Retourne des COMPTEURS (additionnables entre processus)."""
+    watch = watch or {}
     qual = Counter(); rec_dist = defaultdict(Counter); qualified_lists = []
+    cond = {s_: {"aw": [0, 0, 0], "bw": [0, 0, 0]} for s_ in watch}
     for _ in range(n_sims):
-        W = {t: 0 for t in teams16}; Lc = {t: 0 for t in teams16}; played = set()
+        W = {t: 0 for t in teams16}; Lc = {t: 0 for t in teams16}; played = set(); res = {}
         for rnd in range(1, 6):
             done = set(); pairs = []
-            for a, b, bo, win in fixtures_by_round.get(rnd, []):
+            for f in fixtures_by_round.get(rnd, []):
+                a, b, bo, win = f[:4]; slug = f[4] if len(f) > 4 else None
                 if a not in W or b not in W or W[a] >= 3 or Lc[a] >= 3 or W[b] >= 3 or Lc[b] >= 3:
                     continue
-                pairs.append((a, b, bo, win)); done.add(a); done.add(b)
+                pairs.append((a, b, bo, win, slug)); done.add(a); done.add(b)
             rest = [t for t in teams16 if t not in done and W[t] < 3 and Lc[t] < 3]
             groups = defaultdict(list)
             for t in rest: groups[(W[t], Lc[t])].append(t)
@@ -421,27 +426,26 @@ def simulate_swiss(teams16, results, fixtures_by_round, pf, n_sims, force=None, 
                 if ps is None:                                   # etat incoherent : on ignore l'anti-revanche
                     g_ = grp[:]; rng.shuffle(g_); ps = [(g_[i], g_[i + 1]) for i in range(0, len(g_) - 1, 2)]
                 for a, b in ps:
-                    pairs.append((a, b, bo_for(W[a], Lc[a], W[b], Lc[b]), None))
-            for a, b, bo, win in pairs:
+                    pairs.append((a, b, bo_for(W[a], Lc[a], W[b], Lc[b]), None, None))
+            for a, b, bo, win, slug in pairs:
                 if win is None:
-                    if force and {force[0], force[1]} == {a, b}:
-                        win = force[2]
-                    else:
-                        win = a if rng.random() < pf(a, b, bo) else b
+                    win = a if rng.random() < pf(a, b, bo) else b
+                    if slug in watch: res[slug] = win
                 lo = b if win == a else a
                 W[win] += 1; Lc[lo] += 1; played.add(frozenset((a, b)))
-        q = [(t, Lc[t]) for t in teams16 if W[t] >= 3]
-        qualified_lists.append(q)
+        qualified_lists.append([(t, Lc[t]) for t in teams16 if W[t] >= 3])
         for t in teams16:
             rec_dist[t][(W[t], Lc[t])] += 1
             if W[t] >= 3: qual[t] += 1
-    return {"qual": {t: qual[t] / n_sims for t in teams16},
-            "rec": {t: {f"{w}-{l}": c / n_sims for (w, l), c in d.items()} for t, d in rec_dist.items()},
-            "qualified_lists": qualified_lists}
+        for slug, w in res.items():
+            wa_, wb_ = watch[slug]; c = cond[slug]["aw" if w == wa_ else "bw"]
+            c[0] += 1; c[1] += W[wa_] >= 3; c[2] += W[wb_] >= 3
+    return {"n": n_sims, "qual": {t: qual[t] for t in teams16},
+            "rec": {t: {f"{w}-{l}": c for (w, l), c in d.items()} for t, d in rec_dist.items()}, "qualified_lists": qualified_lists, "cond": cond}
 
 
-def knockout_odds(qlists, pf5, rng=RNG):
-    """cotes de titre avec le tirage OFFICIEL des quarts ; demis : appariement des 4 vainqueurs tire au hasard (regle non publiee)."""
+def knockout_counts(qlists, pf5, rng=RNG):
+    """compteurs de titre / demies avec le tirage OFFICIEL des quarts ; demis : appariement des 4 vainqueurs tire au hasard (regle non publiee)."""
     title = Counter(); sf = Counter(); n = 0
     for q in qlists:
         if len(q) != 8:
@@ -459,7 +463,42 @@ def knockout_odds(qlists, pf5, rng=RNG):
         rng.shuffle(w4)
         f = [play(w4[0], w4[1]), play(w4[2], w4[3])]
         title[play(f[0], f[1])] += 1
-    return {t: title[t] / n for t in title} if n else {}, {t: sf[t] / n for t in sf} if n else {}
+    return title, sf, n
+
+
+def _chunk(args):
+    """un lot de simulations dans un processus (probabilites de duel pre-calculees : le lot ne depend que de dictionnaires)."""
+    teams, fixtures, ptab, p5tab, n, seed, watch = args
+    rng = random.Random(seed)
+    out = simulate_swiss(teams, fixtures, lambda a, b, bo: ptab[(a, b, bo)], n, rng=rng, watch=watch)
+    title, sf, kn = knockout_counts(out.pop("qualified_lists"), lambda a, b: p5tab[(a, b)], rng)
+    out.update(title=dict(title), semis=dict(sf), kn=kn)
+    return out
+
+
+def run_sims(teams, fixtures, pf, pf5, n, watch):
+    """n simulations reparties sur tous les coeurs ; retourne probabilites + compteurs conditionnels."""
+    ptab = {(a, b, bo): pf(a, b, bo) for a in teams for b in teams if a != b for bo in (1, 3)}
+    p5tab = {(a, b): pf5(a, b) for a in teams for b in teams if a != b}
+    k = max(1, min(os.cpu_count() or 1, 8)); sizes = [n // k + (1 if i < n % k else 0) for i in range(k)]
+    jobs = [(teams, dict(fixtures), ptab, p5tab, sz, 1000 + i, watch) for i, sz in enumerate(sizes)]
+    if k == 1:
+        outs = [_chunk(jobs[0])]
+    else:
+        with ProcessPoolExecutor(k) as ex:
+            outs = list(ex.map(_chunk, jobs))
+    N = sum(o["n"] for o in outs); KN = sum(o["kn"] for o in outs)
+    def tot(key):
+        c = Counter()
+        for o in outs: c.update(o[key])
+        return c
+    qual = tot("qual"); title = tot("title"); semis = tot("semis")
+    rec = {t: Counter() for t in teams}
+    for o in outs:
+        for t, d in o["rec"].items(): rec[t].update(d)
+    cond = {s_: {side: [sum(o["cond"][s_][side][i] for o in outs) for i in range(3)] for side in ("aw", "bw")} for s_ in watch}
+    return {"n": N, "qual": {t: qual[t] / N for t in teams}, "rec": {t: {k_: v / N for k_, v in rec[t].items()} for t in teams},
+            "title": {t: v / KN for t, v in title.items()} if KN else {}, "semis": {t: v / KN for t, v in semis.items()} if KN else {}, "cond": cond}
 
 
 # ------------------------------------------------------------------ principal
@@ -540,16 +579,16 @@ def main():
             if winner in W: W[winner] += 1
             if lo in Lc: Lc[lo] += 1
         if mt and m["t1"] and m["t2"]:
-            rounds[int(mt.group(1))].append((m["t1"], m["t2"], m["bo"], winner))
+            rounds[int(mt.group(1))].append((m["t1"], m["t2"], m["bo"], winner, None if winner else slug_of(m["id"], m["stage"])))
 
     def pf(a, b, bo):
         return series_p(game_p(a, b, tm, adj, meta)[0], bo)
-    sim = simulate_swiss(swiss, None, rounds, pf, N_SIM) if len(swiss) == 16 else None
-    # TODO ci-dessous : cotes de titre
-    title, semis = ({}, {})
-    if sim:
+    watch = {f[4]: (f[0], f[1]) for rnd_ in rounds.values() for f in rnd_ if f[3] is None and f[4]}
+    sim = None; title, semis = {}, {}
+    if len(swiss) == 16:
         pf5 = lambda a, b: series_p(game_p(a, b, tm, adj, meta)[0], 5)
-        title, semis = knockout_odds(sim["qualified_lists"], pf5)
+        t0 = pd.Timestamp.now(); sim = run_sims(swiss, rounds, pf, pf5, N_SIM, watch); title, semis = sim["title"], sim["semis"]
+        print(f"simulations : {sim['n']:,} en {(pd.Timestamp.now() - t0).total_seconds():.1f} s")
 
     # --- stats Worlds 2026 jusqu'ici (tournoi) + meta recente des ligues majeures ---
     w26 = wl_g[wl_g.date >= "2026-10-01"]
@@ -707,16 +746,14 @@ def main():
                                       "draft_edge": round(edge, 3), "draft_top": contrib[:4]})
         out_matches.append(item)
 
-    # enjeux conditionnels (victoire/defaite) pour les prochains matchs a deux equipes connues
+    # enjeux conditionnels (victoire/defaite) : lus dans la MEME simulation (qualif. de A et B selon le vainqueur du match)
     if sim:
-        upcoming = [m for m in out_matches if m.get("stakes")][:10]
-        for m in upcoming:
-            a, b = m["t1"], m["t2"]
-            res = {}
-            for who, win in (("a_win", a), ("b_win", b)):
-                s = simulate_swiss(swiss, None, rounds, pf, N_COND, force=(a, b, win))
-                res[who] = {"a": round(s["qual"][a], 3), "b": round(s["qual"][b], 3)}
-            m["stakes"]["if"] = res
+        for m in out_matches:
+            if not m.get("stakes") or m["slug"] not in sim["cond"]:
+                continue
+            c = sim["cond"][m["slug"]]; fr = lambda x, n_: round(x / n_, 3) if n_ else None
+            m["stakes"]["if"] = {"a_win": {"a": fr(c["aw"][1], c["aw"][0]), "b": fr(c["aw"][2], c["aw"][0])},
+                                 "b_win": {"a": fr(c["bw"][1], c["bw"][0]), "b": fr(c["bw"][2], c["bw"][0])}}
 
     standings = []
     for t in swiss:

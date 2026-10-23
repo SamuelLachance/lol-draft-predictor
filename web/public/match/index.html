@@ -31,21 +31,9 @@ const PRED=m=>{const l=S.liveSim&&S.liveSim.pred[m.slug];return l&&m.pred?Object
 const STAKES=m=>(S.liveSim&&S.liveSim.stakes[m.slug])||m.stakes;
 async function recompute(){
   if(!S.W)return;const key=(S.es||[]).filter(e=>e.state==='completed').map(e=>e.match.id).join(',')+'|'+S.W.generated;
-  if(key===S.liveKey)return;S.liveKey=key;
-  try{S.liveSim=await SIM.live(S.W,S.es,{findEvent:LP.findEvent,utc:LP.utc,sameTeam:LP.sameTeam});render()}catch(e){console.error(e)}
-}
-
-async function boot(){
-  $('#hbtn').append(LP.langBtn(),LP.themeBtn());
-  S.slug=decodeURIComponent(location.hash.slice(1));
-  window.addEventListener('hashchange',()=>{S.slug=decodeURIComponent(location.hash.slice(1));S.details=null;S.win=null;pollAll()});
-  document.addEventListener('lp:lang',render);
-  try{S.W=await LP.json('worlds',true)}catch(e){$('#view').innerHTML='<div class="err">worlds.json indisponible</div>';return}
-  const [teams,players,regions]=await Promise.all(['teams','players','regions'].map(f=>LP.json(f).catch(()=>[])));
-  LPC.init({teams,players,regions,worlds:S.W});
-  render();pollAll();
-  setInterval(async()=>{try{const l=await LP.json('live',true);if(l.version!==S.W.generated){S.W=await LP.json('worlds',true);LPC.update({worlds:S.W});render()}}catch(e){}},60000);
-  setInterval(pollEs,20000);setInterval(pollLive,10000);setInterval(countdown,1000);
+  if(key===S.liveKey)return;S.liveKey=key;let shown=false;
+  SIM.liveAsync(S.W,S.es,{findEvent:LP.findEvent,utc:LP.utc,sameTeam:LP.sameTeam},{workerUrl:'../simworker.js',n:SIM.N_DEFAULT,
+    onUpdate:(r,done)=>{S.liveSim=r;if(done||!shown){shown=true;render()}}});
 }
 async function pollEs(){const m=cur();if(!m)return;
   try{S.es=await LP.esSchedule();const ev=LP.findEvent(m,S.es);S.ev=ev;recompute();

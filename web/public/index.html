@@ -81,8 +81,10 @@ async function recompute(){
   if(!state.worlds||!window.SIM)return;
   const key=(state.es||[]).filter(e=>e.state==='completed').map(e=>e.match.id).join(',')+'|'+state.worlds.generated;
   if(key===state.liveKey)return; state.liveKey=key;
-  try{state.liveSim=await SIM.live(state.worlds,state.es,{findEvent:LP.findEvent,utc:LP.utc,sameTeam:LP.sameTeam});}catch(e){console.error(e);state.liveSim=null}
-  if(state.view==='worlds')render();
+  let shown=false;
+  // 100 000 simulations dans un Web Worker : premiers resultats apres ~10 000, affinage jusqu'a 100 000 (sans figer la page)
+  SIM.liveAsync(state.worlds,state.es,{findEvent:LP.findEvent,utc:LP.utc,sameTeam:LP.sameTeam},{workerUrl:'simworker.js',n:SIM.N_DEFAULT,
+    onUpdate:(r,done)=>{state.liveSim=r;if(state.view==='worlds'&&$('#modal')?.style.display!=='flex'&&(done||!shown)){shown=true;render()}}});
 }
 async function poll(){
   try{state.es=await LP.esSchedule();state.esAt=Date.now()}catch(e){}
@@ -163,7 +165,7 @@ function oddsPanel(W){
   const p=panel(t('Favoris du titre','Title favourites'));p.classList.add('hl','odds');
   const b=el('div','pbody');
   b.innerHTML=ST.map(s=>`<div class="orow"><span class="nm">${LPC.team(s.team,{b:false})}</span><div class="bar"><span style="width:${(s.title||0)/mx*100}%"></span></div><span class="pc">${pct(s.title)}</span><span class="pc2">${s.w>=3?'✔ top 8':s.l>=3?'✘':'top 8 '+pct(s.qual)}</span></div>`).join('');
-  p.append(b);p.append(el('div','note',(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> · `:'')+`${(state.liveSim?state.liveSim.n:W.sim.n).toLocaleString()} ${t('simulations — règles officielles du Swiss','simulations — official Swiss rules')}`));
+  p.append(b);p.append(el('div','note',(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> · `:'')+`${(state.liveSim?state.liveSim.n:W.sim.n).toLocaleString()}${state.liveSim&&state.liveSim.n<state.liveSim.target?' / '+state.liveSim.target.toLocaleString():''} ${t('simulations — règles officielles du Swiss','simulations — official Swiss rules')}`));
   return p;
 }
 function worldsView(){
@@ -198,7 +200,7 @@ function worldsView(){
       <td data-sort="${q?1.01:out?-1:(s.qual||0)}"><div class="qbar"><div class="bar"><span style="width:${(s.qual||0)*100}%;background:${q?'var(--fav)':out?'var(--bad)':'var(--accent)'}"></span></div><b>${q?'✔':out?'✘':pct(s.qual)}</b></div></td>
       <td class="num">${pct(s.title,1)}</td><td class="muted" style="font-size:.72rem">${top}</td>`;return tr});
   sp2.append(tableEl([['#','rk'],[t('Équipe','Team')],[t('Bilan','Record'),'num'],[t('Qualif. top 8','Top-8')],[t('Titre','Title'),'num'],[t('Bilans probables','Likely records')]],rows));
-  sp2.append(Object.assign(el('div','note'),{innerHTML:(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> ${t('avec les résultats officiels','with the official results')} (${state.liveSim.extra} ${t('match(s) pas encore intégré(s) par le serveur','match(es) not yet folded in by the server')}) · ${state.liveSim.n.toLocaleString()} ${t('simulations dans votre navigateur','simulations in your browser')}. `:`${t('Mis à jour par le serveur','Server-updated')} (${W.generated.slice(11,16)} UTC) · ${W.sim.n.toLocaleString()} ${t('simulations','simulations')}. `)+tx(W.sim.note)+' · '+t('ratings du','ratings as of')+' '+W.data_through+'.'}));
+  sp2.append(Object.assign(el('div','note'),{innerHTML:(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> ${t('avec les résultats officiels','with the official results')} (${state.liveSim.extra} ${t('match(s) pas encore intégré(s) par le serveur','match(es) not yet folded in by the server')}) · ${(state.liveSim.n.toLocaleString()+(state.liveSim.n<state.liveSim.target?' / '+state.liveSim.target.toLocaleString():''))} ${t('simulations dans votre navigateur','simulations in your browser')}. `:`${t('Mis à jour par le serveur','Server-updated')} (${W.generated.slice(11,16)} UTC) · ${W.sim.n.toLocaleString()} ${t('simulations','simulations')}. `)+tx(W.sim.note)+' · '+t('ratings du','ratings as of')+' '+W.data_through+'.'}));
   wrap.append(sp2);
   // --- meta du tournoi
   const M=W.meta_worlds.n>=6?W.meta_worlds:W.meta_recent;

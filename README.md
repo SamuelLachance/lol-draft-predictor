@@ -78,7 +78,9 @@ python ml/build_worlds.py                           # pages de match, simulation
 
 1. **Navigateur → API lolesports** (officielle, CORS ouvert) : statuts/scores toutes les 30 s ; pendant un match, l'état du game (or, kills, tours, objectifs, KDA des joueurs) toutes les 10 s (`web/public/common.js`).
 2. **`.github/workflows/live-update.yml`** (toutes les ~10 min) : relit Leaguepedia, ajoute les games du jour et **refait l'ajustement complet** de la force d'équipe, du niveau des joueurs, de la forme et des h2h (`ml/refresh_ratings.py`, ~40 s, mêmes fonctions que le build quotidien), puis republie `worlds.json` + `live.json`. Le navigateur recharge dès que `live.json` change.
-3. **Simulateur dans le navigateur** (`web/public/sim.js`) : dès qu'un résultat officiel arrive par l'API lolesports (avant le serveur), bilans, chances de qualification/titre et enjeux victoire-défaite sont recalculés localement avec les mêmes règles et le même modèle.
+3. **Simulateur dans le navigateur** (`web/public/sim.js` + Web Worker `simworker.js`) : dès qu'un résultat officiel arrive par l'API lolesports (avant le serveur), bilans, chances de qualification/titre et enjeux victoire-défaite sont recalculés localement avec les mêmes règles et le même modèle : **100 000 simulations** (premiers résultats après ~0,5 s, affinage jusqu'à ~4 s, sans figer la page).
+
+**Simulations : 100 000** côté serveur aussi (`ml/build_worlds.py`, parallélisées sur tous les cœurs, ~4-12 s). Les enjeux « si victoire / si défaite » ne relancent plus de simulations séparées : ils sont lus dans la même simulation (qualification de chaque équipe conditionnellement au vainqueur du match), donc aussi précis que le reste.
 4. **`.github/workflows/daily-update.yml`** (13:00 UTC) : rebuild complet (ratings, modèle, poids du stack, draft), déploiement `gh-pages`.
 
 Le workflow quotidien publie aussi l'asset `games_rich.parquet` de la Release `board-data`, dont dépend le job live (premier run = backfill ~3 min).
