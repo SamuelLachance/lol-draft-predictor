@@ -126,3 +126,7 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
 .plrow{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;border-bottom:1px solid var(--line)}
 .plrow:last-child{border-bottom:none}
 .plrow .kda{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--muted)}
+/* tableaux triables */
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--ink)}
+th .arr{font-size:9px;margin-left:4px;color:var(--accent)}

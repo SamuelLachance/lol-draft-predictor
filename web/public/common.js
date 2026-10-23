@@ -97,3 +97,68 @@
   LP.langBtn = () => { const b = LP.el('button', 'lang', lang.toUpperCase()); b.title = 'FR / EN'; b.onclick = () => { LP.setLang(lang === 'fr' ? 'en' : 'fr'); b.textContent = lang.toUpperCase() }; return b };
   LP.themeBtn = () => { const b = LP.el('button', 'tog', '◐'); b.onclick = LP.toggleTheme; return b };
 })();
+
+/* ---------- tableaux triables : clic sur un en-tete (1er clic : numerique decroissant / texte croissant ; 2e clic : inverse) ---------- */
+(function () {
+  const states = new Map();      // cle de tableau -> {col, dir} : conserve le tri quand la page se re-rend
+  const MISSING = /^(–|-|—|\s*)$/;
+  function parse(cell) {
+    if (cell.dataset.sort !== undefined && cell.dataset.sort !== '') { const n = Number(cell.dataset.sort); return Number.isNaN(n) ? { t: cell.dataset.sort } : { n } }
+    const x = cell.textContent.replace(/\u00a0/g, ' ').trim();
+    if (MISSING.test(x)) return null;
+    if (x === '✔') return { n: 1.01 }; if (x === '✘') return { n: -1 };
+    if (/^\d{4}-\d{2}-\d{2}/.test(x)) return { t: x };
+    let m = x.match(/^(\d+)-(\d+)$/); if (m) { const w = +m[1], l = +m[2]; return { n: (w + l ? w / (w + l) : 0) + w * 1e-6 } }
+    m = x.match(/^([+−-]?\d[\d,]*(?:\.\d+)?)\s*(%|[A-Za-zé]{1,6})?(?:\s|$)/);
+    if (m) return { n: parseFloat(m[1].replace(/,/g, '').replace('−', '-')) };
+    return { t: x.toLowerCase() };
+  }
+  function apply(table, col, dir) {
+    const tb = table.tBodies[0]; if (!tb) return;
+    const rows = [...tb.rows];
+    const th = table.tHead.rows[0].cells[col];
+    let vals = rows.map(r => parse(r.cells[col] || document.createElement('td')));
+    const numeric = vals.filter(v => v && v.n !== undefined).length >= 0.6 * Math.max(1, vals.filter(Boolean).length);
+    const idx = rows.map((r, i) => i);
+    idx.sort((a, b) => {
+      const va = vals[a], vb = vals[b];
+      if (!va && !vb) return +rows[a].dataset.i0 - +rows[b].dataset.i0;
+      if (!va) return 1; if (!vb) return -1;                       // valeurs manquantes toujours en bas
+      let c;
+      if (th.classList.contains('rk')) c = +rows[a].dataset.i0 - +rows[b].dataset.i0;
+      else if (numeric) c = (va.n !== undefined ? va.n : -Infinity) - (vb.n !== undefined ? vb.n : -Infinity);
+      else c = String(va.t !== undefined ? va.t : va.n).localeCompare(String(vb.t !== undefined ? vb.t : vb.n), undefined, { numeric: true });
+      if (c === 0) return +rows[a].dataset.i0 - +rows[b].dataset.i0;
+      return dir === 'asc' ? c : -c;
+    });
+    idx.forEach(i => tb.append(rows[i]));
+    [...tb.rows].forEach((r, i) => { const k = r.querySelector('td.rk'); if (k) k.textContent = i + 1 });
+    [...table.tHead.rows[0].cells].forEach((h, i) => { const a = h.querySelector('.arr'); if (a) a.textContent = i === col ? (dir === 'asc' ? '▲' : '▼') : '' });
+    table._numeric = numeric;
+  }
+  const keyOf = t => ((t.closest('.panel,.mt,.sheet,.pbody') || document.body).querySelector('h3,h2,.sec')?.textContent || '') + '|' + [...t.tHead.rows[0].cells].map(c => c.textContent.trim()).join('|');
+  function init(table) {
+    if (table.dataset.sortable || !table.tHead || !table.tBodies[0] || !table.tHead.rows[0]) return;
+    table.dataset.sortable = '1';
+    [...table.tBodies[0].rows].forEach((r, i) => r.dataset.i0 = i);
+    const key = keyOf(table);
+    [...table.tHead.rows[0].cells].forEach((th, i) => {
+      th.classList.add('sortable'); th.title = LP.t('Cliquer pour trier', 'Click to sort');
+      const a = document.createElement('span'); a.className = 'arr'; th.append(a);
+      th.addEventListener('click', e => {
+        if (e.target.closest('[data-team],[data-player]')) return;
+        const prev = states.get(key); let dir;
+        if (prev && prev.col === i) dir = prev.dir === 'desc' ? 'asc' : 'desc';
+        else { const vs = [...table.tBodies[0].rows].map(r => parse(r.cells[i] || document.createElement('td'))).filter(Boolean); dir = vs.filter(v => v.n !== undefined).length >= 0.6 * Math.max(1, vs.length) && !th.classList.contains('rk') ? 'desc' : 'asc' }
+        states.set(key, { col: i, dir }); apply(table, i, dir);
+      });
+    });
+    const st = states.get(key); if (st) apply(table, st.col, st.dir);
+  }
+  const scan = root => (root.matches && root.matches('table') ? [root] : []).concat([...(root.querySelectorAll ? root.querySelectorAll('table') : [])]).forEach(init);
+  const start = () => {
+    scan(document.body);
+    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) scan(n) }))).observe(document.body, { childList: true, subtree: true });
+  };
+  if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+})();

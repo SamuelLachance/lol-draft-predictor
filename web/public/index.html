@@ -159,7 +159,7 @@ function worldsView(){
     const top=Object.entries(s.rec||{}).slice(0,2).map(([k,v])=>`${k} ${pct(v)}`).join(' · ');
     tr.innerHTML=`<td class="rk">${i+1}</td><td><b class="lnk" data-team="${ea(s.team)}">${esc(s.team)}</b><span class="tag">${esc(s.region||'')}</span></td>
       <td class="num"><b>${s.w}-${s.l}</b></td>
-      <td><div class="qbar"><div class="bar"><span style="width:${(s.qual||0)*100}%;background:${q?'var(--fav)':out?'var(--bad)':'var(--accent)'}"></span></div><b>${q?'✔':out?'✘':pct(s.qual)}</b></div></td>
+      <td data-sort="${q?1.01:out?-1:(s.qual||0)}"><div class="qbar"><div class="bar"><span style="width:${(s.qual||0)*100}%;background:${q?'var(--fav)':out?'var(--bad)':'var(--accent)'}"></span></div><b>${q?'✔':out?'✘':pct(s.qual)}</b></div></td>
       <td class="num">${pct(s.title,1)}</td><td class="muted" style="font-size:11px">${top}</td>`;return tr});
   sp.append(tableEl([['#','rk'],[t('Équipe','Team')],[t('Bilan','Record'),'num'],[t('Qualif. top 8','Top-8')],[t('Titre','Title'),'num'],[t('Bilans probables','Likely records')]],rows));
   sp.append(Object.assign(el('div','note'),{innerHTML:(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> ${t('avec les résultats officiels','with the official results')} (${state.liveSim.extra} ${t('match(s) pas encore intégré(s) par le serveur','match(es) not yet folded in by the server')}) · ${state.liveSim.n.toLocaleString()} ${t('simulations dans votre navigateur','simulations in your browser')}. `:`${t('Mis à jour par le serveur','Server-updated')} (${W.generated.slice(11,16)} UTC) · ${W.sim.n.toLocaleString()} ${t('simulations','simulations')}. `)+tx(W.sim.note)+' · '+t('ratings du','ratings as of')+' '+W.data_through+'.'}));
