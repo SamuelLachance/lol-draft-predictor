@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 import trueskill as ts
 import sys; sys.path.insert(0,str(Path(__file__).resolve().parent))
-import strength as st, draftmodel as dm, model_v2 as mv
+import strength as st, draftmodel as dm, model_v2 as mv, features as ft
 ROOT=Path(__file__).resolve().parents[1]; PROC=ROOT/"data"/"processed"; OUT=ROOT/"web"/"public"/"data"; OUT.mkdir(parents=True,exist_ok=True)
 MODEL_OUT=ROOT/"web"/"public"/"model"; MODEL_OUT.mkdir(parents=True,exist_ok=True)
 ROLES=["top","jng","mid","bot","sup"]
@@ -68,22 +68,28 @@ def main():
         for r,x in zip(ROLES,ncb):CR[getattr(row,f"blue_{r}")]=x
         for r,x in zip(ROLES,ncc):CR[getattr(row,f"red_{r}")]=x
 
-    # ---- force d'equipe v2 : BT a decalage de ligue + stack walk-forward (bt, roster TS, draft) ----
-    G=pd.DataFrame({"gameid":gid,"date":dt._date.values,"league":dt.league.values,"blue":dt.blue_team.astype(str).values,
-        "red":dt.red_team.astype(str).values,"y":y,"elo_logit":elo_logit,"ts_logit":ts_logit})
-    for c in PICK: G[c]=dt[c].astype(str).values
-    G.drop(columns=PICK).to_parquet(PROC/"seq_feats.parquet",index=False)
-    home=st.home_groups(G)
-    asof=G.date.max()+pd.Timedelta(days=1)
-    WF=mv.walk_forward(G,home); W,metrics=mv.stack(WF,home)
-    rating,bt_side,off=st.fit_bt(G,asof,home,**mv.BT)
-    dmod=mv.fit_draft(G,asof)
-    grp=lambda t: home.get(t,"?")
-    reg=lambda t: grp(t) if grp(t) in st.MAJOR else "OTHER"
-    pw=lambda t: st.to_elo(rating(t))
-    wp=W["pre"]; WF["p_pre"]=1/(1+np.exp(-(wp["w0"]+wp["bt"]*WF.bt+wp["ts_logit"]*WF.ts_logit)))
-    p_by_gid=dict(zip(WF.gameid,WF.p_pre))
-    wq=W["post"]; WF["p_post"]=1/(1+np.exp(-(wq["w0"]+wq["bt"]*WF.bt+wq["ts_logit"]*WF.ts_logit+wq["draft"]*WF.draft)))
+    # ---- modele v4 : variables causales (forme, h2h, maitrise...) + BT equipe/joueur + draft, stack walk-forward ----
+    attrs = ft.load_attrs(ROOT / "web" / "public" / "draft" / "data" / "champions.json")
+    dt["playoffs"] = dt.playoffs.fillna(0) if "playoffs" in dt.columns else 0
+    F = ft.build(dt, pg, attrs, TIER1, INTL)
+    G = pd.DataFrame({"gameid": gid, "date": dt._date.values, "league": dt.league.values, "blue": dt.blue_team.astype(str).values,
+        "red": dt.red_team.astype(str).values, "y": y, "elo_logit": elo_logit, "ts_logit": ts_logit})
+    for c in PICK: G[c] = dt[c].astype(str).values
+    for c in ["elo", "ts", "d_fw", "h2h", "comfort", "comfort_min"]: G[c] = F[c].values
+    G["bp"] = [pg.get(x, {}).get("bp") for x in gid]; G["rp"] = [pg.get(x, {}).get("rp") for x in gid]
+    G["has_pl"] = [bool(a_) and all(a_) and bool(b_) and all(b_) for a_, b_ in zip(G.bp, G.rp)]
+    home = st.home_groups(G)
+    asof = G.date.max() + pd.Timedelta(days=1)
+    WF = mv.walk_forward(G, home); W, metrics = mv.stack(WF, home)
+    rating, bt_side, off = st.fit_bt(G, asof, home, **mv.BT)
+    pr_, tdev_, poff_, pbt_side = st.fit_pbt(G, asof, home, **mv.PBT)
+    dmod = mv.fit_draft(G, asof)
+    grp = lambda t: home.get(t, "?")
+    reg = lambda t: grp(t) if grp(t) in st.MAJOR else "OTHER"
+    pw = lambda t: st.to_elo(rating(t))
+    WF["p_pre"] = mv.apply(W["pre"], WF); WF["p_post"] = mv.apply(W["post"], WF)
+    p_by_gid = dict(zip(WF.gameid, WF.p_pre))
+    wq = W["post"]
 
     # export draft v2 (valeur de draft champion x role + matchups/synergies significatifs)
     vocab=dmod["vocab"]; coef=dmod["coef"]; dv={"c":{},"m":{},"s":{}}
@@ -131,7 +137,10 @@ def main():
         t=r.teamname; tts=team_ts(t); g_=reg(t)
         rost=[{"role":ro,"player":roster[t][ro]} for ro in ROLES] if t in roster else []
         mm=team_matches.get(t,[])[:10]; f10=sum(m["win"] for m in mm)
-        teams.append({"team":t,"league":dom_lg.get(t,""),"region":g_,"power":round(pw(t)),"bt":round(float(rating(t)),4),
+        rpl = [roster[t][ro] for ro in ROLES] if t in roster else []
+        pbt_t = poff_.get(g_, 0.0) + tdev_.get(t, 0.0) + sum(pr_.get(p_, 0.0) for p_ in rpl)
+        res_t = [int(w_) for w_ in (dt.blue_win.where(dt.blue_team == t, 1 - dt.blue_win)[(dt.blue_team == t) | (dt.red_team == t)].tail(10))]
+        teams.append({"team":t,"league":dom_lg.get(t,""),"region":g_,"power":round(pw(t)),"bt":round(float(rating(t)),4),"pbt":round(float(pbt_t),4),"fw":st.form_weighted(res_t),
             "elo":round(R.get(t,1500)),"ts_mu":round(tts[0],1) if tts else None,"ts_sig":round(tts[1],1) if tts else None,
             "wins":int(r.wins),"losses":int(r.games-r.wins),"games":int(r.games),"wr":round(r.wins/r.games,3),
             "lg_off":round(st.to_elo(off.get(g_,0.0))-1500),"dev":round(pw(t)-st.to_elo(off.get(g_,0.0))),
@@ -140,6 +149,13 @@ def main():
     teams.sort(key=lambda t:-t["power"])
     json.dump(teams,open(OUT/"teams.json","w",encoding="utf-8"),ensure_ascii=False)
     tnames={t["team"] for t in teams}
+    h2h={}
+    rec2=dt[dt._date>=asof-pd.Timedelta(days=730)]
+    for r_ in rec2.itertuples():
+        if r_.blue_team in tnames and r_.red_team in tnames:
+            k_="|".join(sorted((r_.blue_team,r_.red_team))); e_=h2h.setdefault(k_,{"n":0,"w":{}}); e_["n"]+=1
+            wn=r_.blue_team if r_.blue_win else r_.red_team; e_["w"][wn]=e_["w"].get(wn,0)+1
+    json.dump(h2h,open(OUT/"h2h.json","w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
 
     # ---- players.json : PERF INDIVIDUELLE (signal primaire) + contexte d'equipe calibre par ligue ----
     rt1=recent.copy().sort_values("_date")
@@ -223,9 +239,9 @@ def main():
     data_through=str(dt._date.max().date())
     json.dump({"updated":str(pd.Timestamp.now().date()),"data_through":data_through,
         "n_teams":len(teams),"n_players":len(players),"n_champions":len(champs),"n_games":int(n),
-        "model":"League-calibrated Bradley-Terry + roster TrueSkill + draft v2","recent_acc":round(acc300,3),
-        "blend":{"pre":W["pre"],"post":W["post"],"bt_side":bt_side},"metrics":metrics,"bt_params":mv.BT,
-        "note":"Walk-forward validated (monthly refits, no leakage). Draft adds a small edge on top of team strength."},
+        "model":"v4 stack: team + player Bradley-Terry, roster TrueSkill, form, head-to-head, draft, player-champion mastery","recent_acc":round(acc300,3),
+        "blend":{"pre":W["pre"],"post":W["post"],"bt_side":bt_side,"pbt_side":pbt_side},"metrics":metrics,"bt_params":mv.BT,"pbt_params":mv.PBT,
+        "note":"Walk-forward validated (monthly refits, no leakage). Pro games are noisy: ~65% is near the ceiling for pre-game information."},
         open(OUT/"meta.json","w",encoding="utf-8"),ensure_ascii=False)
     WF[["gameid","bt","draft","p_pre","p_post"]].to_parquet(PROC/"wf_preds.parquet",index=False)
     print(f"teams {len(teams)} | players {len(players)} | champs {len(champs)} | regions {len(regions)} | acc300 {acc300:.3f} | data_through {data_through}")

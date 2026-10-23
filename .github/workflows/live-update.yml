@@ -36,7 +36,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install --quiet pandas numpy pyarrow scikit-learn
+        run: pip install --quiet pandas numpy pyarrow scikit-learn scipy
 
       # si l'asset n'existe pas encore (avant le 1er run quotidien), fetch_rich fait le backfill (~3 min)
       # snapshot des games (ratings) : ajoute les games du jour puis REFIT rapide du modele de force d'equipe (~15 s)
@@ -58,18 +58,18 @@ jobs:
       - name: Build Worlds pages data from the published ratings
         run: |
           mkdir -p web/public/data web/public/model
-          cp site/data/teams.json site/data/players.json site/data/meta.json site/data/regions.json web/public/data/
+          cp site/data/teams.json site/data/players.json site/data/meta.json site/data/regions.json site/data/h2h.json web/public/data/
           cp site/model/draft_v2.json web/public/model/
           python ml/refresh_ratings.py || echo "refit indisponible : ratings du dernier build quotidien conserves"
           python ml/build_worlds.py
 
       - name: Publish worlds.json + live.json
         run: |
-          cp web/public/data/worlds.json web/public/data/live.json web/public/data/teams.json web/public/data/regions.json web/public/data/meta.json site/data/
+          cp web/public/data/worlds.json web/public/data/live.json web/public/data/teams.json web/public/data/regions.json web/public/data/meta.json web/public/data/h2h.json site/data/
           cd site
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/worlds.json data/live.json data/teams.json data/regions.json data/meta.json
+          git add data/worlds.json data/live.json data/teams.json data/regions.json data/meta.json data/h2h.json
           if git diff --cached --quiet; then echo "no change"; else
             git commit -q -m "Live Worlds update $(date -u +%FT%TZ)"
             git push -q origin gh-pages

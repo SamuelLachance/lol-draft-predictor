@@ -15,6 +15,7 @@
 <footer id="foot"></footer>
 </div>
 <script src="../common.js"></script>
+<script src="../sim.js"></script>
 <script>
 window.addEventListener('error',e=>{const v=document.getElementById('view');if(v&&!v.querySelector('.panel'))v.innerHTML='<div class="err">⚠ '+String(e.message).replace(/</g,'&lt;')+'</div>'});
 </script>
@@ -22,9 +23,16 @@ window.addEventListener('error',e=>{const v=document.getElementById('view');if(v
 const {$,el,esc,pct,t,tx}=LP;
 const ROLES=['top','jng','mid','bot','sup'];
 const RN={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Support'};
-const S={W:null,slug:'',ev:null,details:null,win:null,es:[],winAt:0};
+const S={liveSim:null,liveKey:'',W:null,slug:'',ev:null,details:null,win:null,es:[],winAt:0};
 const ea=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
 const cur=()=>S.W&&S.W.matches.find(m=>m.slug===S.slug);
+const PRED=m=>{const l=S.liveSim&&S.liveSim.pred[m.slug];return l&&m.pred?Object.assign({},m.pred,{series:l.series,game:l.game,live:true}):m.pred};
+const STAKES=m=>(S.liveSim&&S.liveSim.stakes[m.slug])||m.stakes;
+async function recompute(){
+  if(!S.W)return;const key=(S.es||[]).filter(e=>e.state==='completed').map(e=>e.match.id).join(',')+'|'+S.W.generated;
+  if(key===S.liveKey)return;S.liveKey=key;
+  try{S.liveSim=await SIM.live(S.W,S.es,{findEvent:LP.findEvent,utc:LP.utc,sameTeam:LP.sameTeam});render()}catch(e){console.error(e)}
+}
 
 async function boot(){
   $('#hbtn').append(LP.langBtn(),' ',LP.themeBtn());
@@ -37,7 +45,7 @@ async function boot(){
   setInterval(pollEs,20000);setInterval(pollLive,10000);setInterval(countdown,1000);
 }
 async function pollEs(){const m=cur();if(!m)return;
-  try{S.es=await LP.esSchedule();const ev=LP.findEvent(m,S.es);S.ev=ev;
+  try{S.es=await LP.esSchedule();const ev=LP.findEvent(m,S.es);S.ev=ev;recompute();
     if(ev&&(ev.state==='inProgress'||(ev.state==='completed'&&!S.details))){S.details=await LP.esDetails(ev.match.id)}
     renderTop();renderLiveBlock()}catch(e){}}
 async function pollLive(){const m=cur();if(!m||!S.ev||S.ev.state!=='inProgress')return;
@@ -55,7 +63,7 @@ function render(){
   v.append(el('div',null,'<div id="top"></div>'));v.append(el('div',null,'<div id="liveblock"></div>'));
   if(m.pred){
     v.append(probPanel(m));
-    if(m.stakes)v.append(stakesPanel(m));
+    if(STAKES(m))v.append(stakesPanel(m));
     if(m.games&&m.games.length)v.append(gamesPanel(m));
     v.append(contestedPanel(m));
     v.append(draftOutlook(m));
@@ -70,8 +78,8 @@ function render(){
 }
 function status(){
   const m=cur();let st=m.status==='completed'?'completed':'unstarted',s1=m.s1,s2=m.s2;
-  if(S.ev){st=S.ev.state;const ts=S.ev.match.teams,n1=(m.t1||'').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,4);
-    const f=ts[1]&&ts[1].name.toLowerCase().replace(/[^a-z0-9]/g,'').startsWith(n1)&&!ts[0].name.toLowerCase().replace(/[^a-z0-9]/g,'').startsWith(n1);
+  if(S.ev){st=S.ev.state;const ts=S.ev.match.teams;
+    const f=!!m.t1&&LP.sameTeam(ts[1].name,m.t1)&&!LP.sameTeam(ts[0].name,m.t1);
     const w=ts.map(x=>x.result?x.result.gameWins:null);if(w[0]!=null){s1=f?w[1]:w[0];s2=f?w[0]:w[1]}}
   return {st,s1,s2};
 }
@@ -82,13 +90,13 @@ function renderTop(){
   $('#title').textContent=known?`${m.t1} vs ${m.t2}`:t('Match à déterminer','Match TBD');
   $('#sub').textContent=`Worlds 2026 · ${m.stage==='Play-In'?'Play-In':'Swiss / Main Event'} · ${m.round||''} · Bo${m.bo}`;
   const chip=st==='inProgress'?'<span class="chip live">● LIVE</span>':st==='completed'?`<span class="chip done">${t('Terminé','Final')}</span>`:`<span class="chip up">${LP.fmtDay(ts)} · ${LP.fmtTime(ts)}</span>`;
-  const p=m.pred;
+  const p=PRED(m);
   const A=m.t1,B=m.t2;
   top.innerHTML=`<div class="panel"><div class="hero">
     <div style="flex:1;min-width:140px;text-align:right"><div class="big ${st==='completed'&&Number(s1)<Number(s2)?'muted':''}">${esc(A||'TBD')}</div></div>
     <div style="text-align:center"><div class="big" style="font-variant-numeric:tabular-nums">${s1==null?'–':s1} : ${s2==null?'–':s2}</div><div>${chip}</div><div class="muted" style="font-size:11px" id="cd"></div></div>
     <div style="flex:1;min-width:140px"><div class="big ${st==='completed'&&Number(s2)<Number(s1)?'muted':''}">${esc(B||'TBD')}</div></div>
-    ${p?`<div style="flex-basis:100%"><div class="wpbar" style="margin:6px 0 0"><span style="width:${p.series*100}%"></span></div><div class="ft" style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px"><b>${pct(p.series,1)}</b><span class="muted">${t('probabilité de gagner la série (avant draft)','series win probability (pre-draft)')}</span><b>${pct(1-p.series,1)}</b></div></div>`:''}
+    ${p?`<div style="flex-basis:100%"><div class="wpbar" style="margin:6px 0 0"><span style="width:${p.series*100}%"></span></div><div class="ft" style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px"><b>${pct(p.series,1)}</b><span class="muted">${t('probabilité de gagner la série (avant draft)','series win probability (pre-draft)')}${p.live?' · <b style="color:var(--accent)">● '+t('recalculée en direct','recomputed live')+'</b>':''}</span><b>${pct(1-p.series,1)}</b></div></div>`:''}
     ${m.stream?`<div style="flex-basis:100%;text-align:center"><a href="${ea(m.stream)}" target="_blank" rel="noopener">▶ ${t('Regarder le match','Watch the match')}</a></div>`:''}
   </div></div>`;
 }
@@ -125,7 +133,7 @@ function renderLiveBlock(){
 
 // ---------- probas ----------
 function probPanel(m){
-  const p=m.pred,A=m.t1,B=m.t2;
+  const p=PRED(m),A=m.t1,B=m.t2;
   const pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Probabilités du modèle','Model probabilities')}</h3><span class="muted" style="font-size:11px">${t('avant draft · validé en walk-forward','pre-draft · walk-forward validated')}</span></div>`;
   const b=el('div','pbody');
   b.innerHTML=`<div class="two"><div>
@@ -139,7 +147,7 @@ function probPanel(m){
   pn.append(b);return pn;
 }
 function stakesPanel(m){
-  const s=m.stakes,pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Enjeux — Swiss Stage','Stakes — Swiss Stage')}</h3></div>`;
+  const s=STAKES(m),pn=el('div','panel');pn.innerHTML=`<div class="phead"><h3>${t('Enjeux — Swiss Stage','Stakes — Swiss Stage')}</h3></div>`;
   const b=el('div','pbody'),A=m.t1,B=m.t2,i=s.if||{};
   const row=(team,rec,now,win,lose)=>`<tr><td><b>${esc(team)}</b></td><td class="num">${rec}</td><td class="num">${pct(now)}</td><td class="num ok">${win!=null?pct(win):'–'}</td><td class="num no">${lose!=null?pct(lose):'–'}</td><td class="num"><b>${win!=null&&lose!=null?'±'+Math.round((win-lose)*100)+' pts':''}</b></td></tr>`;
   b.append(tableEl([[t('Équipe','Team')],[t('Bilan','Record'),'num'],[t('Qualif. avant','Qualif. now'),'num'],[t('Si victoire','If win'),'num'],[t('Si défaite','If loss'),'num'],[t('Enjeu','Swing'),'num']],
@@ -148,7 +156,7 @@ function stakesPanel(m){
   let msg=t('Match de placement : chaque victoire rapproche des 3 victoires (top 8), chaque défaite des 3 défaites (élimination).','Seeding match: each win moves a team toward 3 wins (top 8), each loss toward 3 losses (elimination).');
   if(wa===2||wb===2)msg=t('⚠ Match de qualification : le vainqueur est qualifié pour les quarts de finale (top 8).','⚠ Qualification match: the winner is through to the quarterfinals (top 8).');
   if(la===2||lb===2)msg=(wa===2||wb===2?'':'')+t('☠ Match d\'élimination : le perdant est éliminé du tournoi.','☠ Elimination match: the loser is out of the tournament.')+((wa===2||wb===2)?' '+t('(et le vainqueur se qualifie)','(and the winner qualifies)'):'');
-  b.append(el('div','note',msg+' '+t('Chances calculées par simulation Monte-Carlo du reste du Swiss.','Odds from a Monte-Carlo simulation of the rest of the Swiss.')));
+  b.append(el('div','note',msg+' '+t('Chances calculées par simulation Monte-Carlo du reste du Swiss avec les règles officielles (tirage au hasard dans le même bilan, sans revanche).','Odds from a Monte-Carlo simulation of the rest of the Swiss under the official rules (random draw within the same record, no rematches).')+(S.liveSim?' <b style="color:var(--accent)">● '+t('Recalculé en direct avec les résultats officiels.','Recomputed live with the official results.')+'</b>':'')));
   pn.append(b);return pn;
 }
 function rowEl(html){const t_=document.createElement('table');t_.innerHTML='<tbody>'+html+'</tbody>';return t_.querySelector('tr')}

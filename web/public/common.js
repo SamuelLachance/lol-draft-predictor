@@ -63,7 +63,10 @@
   // ---------- API lolesports (officielle, CORS ouvert) : calendrier + games en direct ----------
   const ES = 'https://esports-api.lolesports.com/persisted/gw/', KEY = '0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z', WORLDS = '98767975604431411';
   const esGet = async (p) => { const r = await fetch(ES + p, { headers: { 'x-api-key': KEY } }); if (!r.ok) throw new Error('es ' + r.status); return r.json() };
-  const nk = s => String(s || '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const nk = s => String(s || '').replace(/ø/gi, 'o').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
+  LP.nk = nk;
+  // memes equipes ? egalite ou inclusion (>=3 car.) : 'Gen.G' ~ 'Gen.G Esports', 'LØS' ~ 'LOS' ; 'Team Liquid' !~ 'Team Secret Whales'
+  LP.sameTeam = (a, b) => { const x = nk(a), y = nk(b); return !!x && !!y && (x === y || (Math.min(x.length, y.length) >= 3 && (x.includes(y) || y.includes(x)))) };
   LP.esSchedule = async () => {
     const d = await esGet('getSchedule?hl=en-US&leagueId=' + WORLDS);
     return d.data.schedule.events.filter(e => e.startTime >= '2026-10-01' && e.match);
@@ -75,7 +78,7 @@
     events.forEach(e => {
       const dt = Math.abs(Date.parse(e.startTime) - ts); if (dt > 3 * 3600e3) return;
       const names = e.match.teams.flatMap(t => [nk(t.name), nk(t.code)]);
-      const hit = mine.filter(n => names.some(x => x && (x.startsWith(n.slice(0, 4)) || n.startsWith(x.slice(0, 4))))).length;
+      const hit = mine.filter(n => names.some(x => x && LP.sameTeam(n, x))).length;
       const sc = dt - hit * 4 * 3600e3; if (sc < bs) { bs = sc; best = e }
     });
     return best;

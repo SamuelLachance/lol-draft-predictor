@@ -277,9 +277,16 @@ def ban_dist(Pme, Pop):
     return {c: min(.95, 5 * v / tot) for c, v in sc.items()}
 
 
-# ------------------------------------------------------------------ proba de match
-def team_logit(t, tm, adj):
-    return tm[t]["bt"] + adj.get(t, 0.0)
+# ------------------------------------------------------------------ proba de match (modele v4)
+H2H = {}
+
+
+def h2h_x(a, b):
+    """confrontations directes sur 2 ans, (victoires de a + 1)/(n + 2) - 1/2 (meme definition que a l'entrainement)."""
+    e = H2H.get("|".join(sorted((a, b))))
+    if not e:
+        return 0.0
+    return (e["w"].get(a, 0) + 1) / (e["n"] + 2) - 0.5
 
 
 def ts_logit(a, b, tm):
@@ -292,13 +299,36 @@ def ts_logit(a, b, tm):
     return math.log(p / (1 - p))
 
 
-def game_p(a, b, tm, adj, meta):
-    """P(a bat b) en un game, symetrisee sur le side (a bleu / a rouge)."""
-    w = meta["blend"]["pre"]; side = meta["blend"]["bt_side"]
-    d = team_logit(a, tm, adj) - team_logit(b, tm, adj); t = ts_logit(a, b, tm)
-    p_blue = sig(w["w0"] + w["bt"] * (d + side) + w["ts_logit"] * t)
-    p_red = sig(w["w0"] + w["bt"] * (-d + side) + w["ts_logit"] * -t)
+def feats(a, b, tm, adj, meta):
+    """variables du stack du point de vue de `a` joue en BLEU contre `b`."""
+    bl = meta["blend"]; A, B = tm[a], tm[b]
+    f = {"bt": (A["bt"] + adj.get(a, 0.0)) - (B["bt"] + adj.get(b, 0.0)) + bl["bt_side"],
+         "pbt": A.get("pbt", 0.0) - B.get("pbt", 0.0) + bl.get("pbt_side", 0.0),
+         "ts": ts_logit(a, b, tm), "h2h": h2h_x(a, b)}
+    f["d_fw"] = (A["fw"] - B["fw"]) if A.get("fw") is not None and B.get("fw") is not None else None
+    return f
+
+
+def zscore(wt, f):
+    z = wt["w0"]
+    for c, fill in wt["fill"].items():
+        v = f.get(c)
+        z += wt[c] * (fill if v is None or v != v else v)
+    return z
+
+
+def game_p(a, b, tm, adj, meta, which="pre", extra=None):
+    """P(a bat b) en un game, symetrisee sur le side ; retourne (p, p_a_bleu, p_a_rouge)."""
+    wt = meta["blend"][which]
+    fa = feats(a, b, tm, adj, meta); fb = feats(b, a, tm, adj, meta)
+    if extra:
+        fa.update(extra[0]); fb.update(extra[1])
+    p_blue = sig(zscore(wt, fa)); p_red = sig(zscore(wt, fb))
     return 0.5 * (p_blue + 1 - p_red), p_blue, 1 - p_red
+
+
+def series_p_(p, bo):
+    return series_p(p, bo)
 
 
 # ------------------------------------------------------------------ simulation Swiss (regles OFFICIELLES)
@@ -409,6 +439,11 @@ def main():
     pidx = defaultdict(dict)
     for p in players:
         pidx[p["team"]][p["role"]] = p
+    global H2H
+    try:
+        H2H = json.load(open(DATA / "h2h.json", encoding="utf-8"))
+    except Exception:
+        H2H = {}
     data_through = pd.Timestamp(meta["data_through"])
     # rating "live" : ajustement logit par game Worlds jouee apres le dernier build complet
     adj = defaultdict(float)
@@ -513,22 +548,23 @@ def main():
             pg, pa_blue, pb_blue_inv = game_p(a, b, tm, adj, meta)
             ps = series_p(pg, m["bo"])
             A, B = tm[a], tm[b]
-            wgt = meta["blend"]["pre"]
-            dbt = team_logit(a, tm, adj) - team_logit(b, tm, adj)
-            contrib_bt = wgt["bt"] * dbt
-            contrib_ts = wgt["ts_logit"] * ts_logit(a, b, tm)
-            def pts(x): return round((sig(x) - .5) * 100, 1)
+            wgt = meta["blend"]["pre"]; fa = feats(a, b, tm, adj, meta)
+            def pts(c):
+                v = fa.get(c); v = wgt["fill"][c] if v is None or v != v else v
+                return round((sig(wgt[c] * (v - wgt["fill"][c])) - .5) * 100, 1)       # effet de la variable par rapport a une equipe "moyenne"
+            fwa, fwb = A.get("fw"), B.get("fw")
             factors = [
-                {"k": "power", "t": T("Force d'équipe (Elo calibré par ligue)", "Team strength (league-calibrated Elo)"), "a": A["power"], "b": B["power"], "pts": pts(contrib_bt)},
-                {"k": "ts", "t": T("Niveau des rosters (TrueSkill joueurs)", "Roster level (player TrueSkill)"), "a": A.get("ts_mu"), "b": B.get("ts_mu"), "pts": pts(contrib_ts)},
+                {"k": "power", "t": T("Force d'équipe (Elo calibré par ligue)", "Team strength (league-calibrated Elo)"), "a": A["power"], "b": B["power"], "pts": pts("bt")},
+                {"k": "pbt", "t": T("Niveau des joueurs (Bradley-Terry par joueur)", "Player level (player-level Bradley-Terry)"), "a": round(A.get("pbt", 0) * 173.7), "b": round(B.get("pbt", 0) * 173.7), "pts": pts("pbt")},
+                {"k": "ts", "t": T("Rosters (TrueSkill joueurs)", "Rosters (player TrueSkill)"), "a": A.get("ts_mu"), "b": B.get("ts_mu"), "pts": pts("ts")},
+                {"k": "form", "t": T("Forme pondérée (10 derniers)", "Weighted form (last 10)"), "a": f"{A['form']} ({fwa*100:.0f})" if fwa is not None else A["form"], "b": f"{B['form']} ({fwb*100:.0f})" if (fwb := B.get("fw")) is not None else B["form"], "pts": pts("d_fw")},
                 {"k": "league", "t": T("Force de la ligue", "League strength"), "a": f"{A['region']} ({A['lg_off']:+d})", "b": f"{B['region']} ({B['lg_off']:+d})", "pts": None},
-                {"k": "form", "t": T("Forme (10 derniers matchs)", "Form (last 10)"), "a": A["form"], "b": B["form"], "pts": None},
             ]
-            h2h = g[(((g.blue == a) & (g.red == b)) | ((g.blue == b) & (g.red == a)))]
-            hw = int(sum(((r.blue == a) == bool(r.blue_win)) for r in h2h.itertuples()))
+            he = H2H.get("|".join(sorted((a, b)))) or {"n": 0, "w": {}}
+            factors.append({"k": "h2h", "t": T("Confrontations directes (2 ans)", "Head-to-head (2 years)"), "a": he["w"].get(a, 0), "b": he["w"].get(b, 0), "pts": pts("h2h")})
             item["pred"] = {"game": round(pg, 4), "series": round(ps, 4), "a_blue": round(pa_blue, 4), "a_red": round(pb_blue_inv, 4),
                             "adj": {"a": round(adj.get(a, 0), 3), "b": round(adj.get(b, 0), 3)}, "factors": factors,
-                            "h2h": {"games": int(len(h2h)), "a_wins": hw, "since": "2025-01"}}
+                            "h2h": {"games": int(he["n"]), "a_wins": int(he["w"].get(a, 0)), "since": "2 ans"}}
             # --- champions contestes : stats observees + PREDICTIONS du modele pour CE match ---
             Pa, Pb = profiles.get(a), profiles.get(b)
             if Pa and Pb:
@@ -618,10 +654,9 @@ def main():
                 contrib.sort(key=lambda x: -abs(x["v"]))
                 pg_ = None
                 if r.blue in tm and r.red in tm:
-                    d = team_logit(r.blue, tm, {}) - team_logit(r.red, tm, {})
-                    wp0 = meta["blend"]["pre"]
-                    pre = sig(wp0["w0"] + wp0["bt"] * (d + meta["blend"]["bt_side"]) + wp0["ts_logit"] * ts_logit(r.blue, r.red, tm))
-                    post = sig(w_post["w0"] + w_post["bt"] * (d + meta["blend"]["bt_side"]) + w_post["ts_logit"] * ts_logit(r.blue, r.red, tm) + w_post["draft"] * edge)
+                    pre = game_p(r.blue, r.red, tm, {}, meta, "pre")[1]
+                    ex = ({"draft": edge}, {"draft": -edge})                 # comfort inconnu ici -> moyenne d'entrainement
+                    post = game_p(r.blue, r.red, tm, {}, meta, "post", ex)[1]
                     pg_ = {"pre": round(pre, 4), "post": round(post, 4)}
                 item["games"].append({"n": int(r.game_n), "blue": r.blue, "red": r.red, "blue_win": int(r.blue_win), "length": r.length,
                                       "blue_picks": r.blue_picks, "red_picks": r.red_picks, "blue_bans": r.blue_bans, "red_bans": r.red_bans,
@@ -685,7 +720,8 @@ def main():
     worlds = {"generated": now, "data_through": meta["data_through"], "rating_adjusted_games": int(len(wg)),
               "swiss": swiss, "standings": standings, "matches": out_matches, "profiles": {t: p for t, p in profiles.items() if p},
               "meta_worlds": meta_w, "meta_recent": meta_m, "sim": {"n": N_SIM, "note": T("Règles officielles Riot : à partir du R2, adversaire tiré au hasard parmi les équipes du même bilan, sans revanche ; quarts : les 3-0 contre des 3-2 tirés au sort, les 4 autres au hasard ; demi-finales tirées au hasard (règle non publiée).", "Official Riot rules: from R2 on, opponent drawn at random among teams with the same record, no rematches; quarterfinals: the 3-0 teams vs 3-2 teams drawn at random, the other four at random; semifinal pairing random (rule not published).")},
-              "ratings": {t: {"bt": tm[t]["bt"] + adj.get(t, 0.0), "ts_mu": tm[t].get("ts_mu"), "ts_sig": tm[t].get("ts_sig"), "power": tm[t]["power"]} for t in swiss if t in tm},
+              "ratings": {t: {"bt": tm[t]["bt"] + adj.get(t, 0.0), "pbt": tm[t].get("pbt", 0.0), "fw": tm[t].get("fw"), "ts_mu": tm[t].get("ts_mu"), "ts_sig": tm[t].get("ts_sig"), "power": tm[t]["power"]} for t in swiss if t in tm},
+              "h2h": {k: v for k, v in H2H.items() if all(x in swiss for x in k.split("|"))},
               "done_ids": [m["id"] for m in out_matches if m["status"] == "completed" and m["stage"] == "Main Event"],
               "model": {"metrics": meta.get("metrics"), "blend": meta["blend"], "data_through": meta["data_through"]}}
     json.dump(worlds, open(DATA / "worlds.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))

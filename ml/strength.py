@@ -87,3 +87,53 @@ def fit_bt(g: pd.DataFrame, asof, home: dict[str, str], halflife: float = 365, l
 def to_elo(logit: float) -> float:
     """logit -> echelle Elo (400/ln10), centre sur 1500."""
     return 1500 + logit * 400 / np.log(10)
+
+
+# ---------------------------------------------------------------- Bradley-Terry au niveau JOUEUR
+def fit_pbt(G: pd.DataFrame, asof, home: dict, halflife=365, lam=8.0, sp_=1.0, st_=0.5, sg=2.0, window=1100):
+    """niveau d'un joueur = coefficient ridge ; force d'equipe = somme des 5 joueurs + decalage de ligue + petit ecart d'equipe.
+    G doit contenir : date, blue, red, y, bp, rp (listes de 5 joueurs) et has_pl. Retourne (player_rating, team_dev, league_off, side)."""
+    asof = pd.Timestamp(asof)
+    h = G[(G.date < asof) & (G.date >= asof - pd.Timedelta(days=window)) & G.has_pl]
+    teams = sorted(set(h.blue) | set(h.red)); groups = sorted({home.get(t, "?") for t in teams})
+    pl = sorted({p for l in h.bp for p in l} | {p for l in h.rp for p in l})
+    ti = {t: i for i, t in enumerate(teams)}; gi = {x: i for i, x in enumerate(groups)}; pi = {p: i for i, p in enumerate(pl)}
+    nt, ng = len(teams), len(groups); n = len(h)
+    r, c, v = [], [], []
+    for i, (b, rr, bp, rp) in enumerate(zip(h.blue, h.red, h.bp, h.rp)):
+        r += [i, i]; c += [ti[b], ti[rr]]; v += [st_, -st_]
+        r += [i, i]; c += [nt + gi[home.get(b, "?")], nt + gi[home.get(rr, "?")]]; v += [sg, -sg]
+        for p in bp: r.append(i); c.append(nt + ng + pi[p]); v.append(sp_)
+        for p in rp: r.append(i); c.append(nt + ng + pi[p]); v.append(-sp_)
+    X = sp.csr_matrix((v, (r, c)), shape=(n, nt + ng + len(pl)))
+    age = (asof - h.date).dt.total_seconds().to_numpy() / 86400; w = 0.5 ** (age / halflife)
+    m = LogisticRegression(C=1.0 / lam, max_iter=400).fit(X, h.y.to_numpy(), sample_weight=w)
+    co = m.coef_[0]
+    return ({p: float(co[nt + ng + i] * sp_) for p, i in pi.items()}, {t: float(co[i] * st_) for t, i in ti.items()},
+            {x: float(co[nt + i] * sg) for x, i in gi.items()}, float(m.intercept_[0]))
+
+
+def pbt_diff(blue, red, bp, rp, pr, tdev, off, home):
+    """logit(niveau bleu) - logit(niveau rouge), hors biais de side."""
+    sb = off.get(home.get(blue, "?"), 0) + tdev.get(blue, 0) + sum(pr.get(p, 0) for p in bp)
+    sr = off.get(home.get(red, "?"), 0) + tdev.get(red, 0) + sum(pr.get(p, 0) for p in rp)
+    return sb - sr
+
+
+def player_lists(oe: pd.DataFrame) -> dict:
+    """gameid -> {'bp': [5 joueurs], 'rp': [5 joueurs]} a partir des lignes joueur (position top..sup)."""
+    roles = ["top", "jng", "mid", "bot", "sup"]
+    pl = oe[oe.position.astype(str).str.lower().isin(roles)].copy()
+    pl["position"] = pl.position.astype(str).str.lower(); pl["side"] = pl.side.astype(str).str.lower()
+    wide = pl.drop_duplicates(["gameid", "side", "position"]).pivot(index="gameid", columns=["side", "position"], values="playername")
+    def cols(side): return [wide[(side, r)] if (side, r) in wide.columns else pd.Series(None, index=wide.index, dtype=object) for r in roles]
+    bps, rps = list(zip(*cols("blue"))), list(zip(*cols("red")))
+    return {g: {"bp": [x if isinstance(x, str) else None for x in b], "rp": [x if isinstance(x, str) else None for x in r]} for g, b, r in zip(wide.index, bps, rps)}
+
+
+def form_weighted(results) -> float | None:
+    """forme ponderee (poids 0.85^k, le plus recent = 1) sur les 10 derniers resultats (ancien -> recent)."""
+    res = list(results)[-10:]
+    if not res:
+        return None
+    w = np.array([0.85 ** k for k in range(len(res))][::-1]); return float((np.array(res) * w).sum() / w.sum())

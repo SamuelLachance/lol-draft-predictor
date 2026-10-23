@@ -21,11 +21,12 @@
 </div>
 
 <script src="common.js"></script>
+<script src="sim.js"></script>
 <script>
 const {$,el,esc,pct,t,tx}=LP;
 const ROLES=['top','jng','mid','bot','sup'];
 const RN={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Support'};
-const state={teams:[],players:[],champions:[],matches:[],meta:{},regions:[],pool:[],worlds:null,dv:null,es:[],esAt:0,
+const state={liveSim:null,liveKey:'',teams:[],players:[],champions:[],matches:[],meta:{},regions:[],pool:[],worlds:null,dv:null,es:[],esAt:0,
   view:'worlds',tLeague:'ALL',pRole:'mid',cRole:'ALL',cSrc:'worlds',wFilter:'up'};
 const ea=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
 const TABS=()=>[['worlds','Worlds 2026'],['picks',t('Résultats vs modèle','Results vs model')],['teams',t('Équipes','Teams')],
@@ -71,10 +72,10 @@ function buildIndexes(){
   });
 }
 function cards(){
-  const m=state.meta,w=state.worlds,mm=(m.metrics||{})['bt+ts+draft']||{},old=(m.metrics||{}).elo_seq_ancien||{};
+  const m=state.meta,w=state.worlds,mm=(m.metrics||{})['pre-draft']||{},old=(m.metrics||{}).elo_seq_ancien||{};
   const c=$('#cards');c.innerHTML='';
   const data=[[t('Données jusqu\'au','Data through'),(m.data_through||m.updated)+(m.n_games?` <small>${m.n_games.toLocaleString()} games</small>`:'')],
-    [t('Précision walk-forward','Walk-forward accuracy'),pct(mm.acc,1)+` <small>${t('vs ancien','vs old')} ${pct(old.acc,1)}</small>`],
+    [t('Précision walk-forward (avant draft)','Walk-forward accuracy (pre-draft)'),pct(mm.acc,1)+` <small>${t('post-draft','post-draft')} ${pct(((m.metrics||{})['post-draft']||{}).acc,1)} · ${t('ancien','old')} ${pct(old.acc,1)}</small>`],
     [t('Log-loss','Log-loss'),(mm.logloss||'–')+` <small>${t('ancien','old')} ${old.logloss||'–'}</small>`],
     [t('Équipes majeures','Major teams'),m.n_teams],[t('Joueurs','Players'),m.n_players]];
   data.forEach(([k,v])=>{const d=el('div','card');d.append(el('div','k',k),el('div','v',v));c.append(d)});
@@ -86,10 +87,18 @@ function tickStatus(){
   s.textContent=(live?`🔴 ${live} ${t('match en direct','live match(es)')} · `:'')+
     t('Modèle recalculé','Model rebuilt')+' '+(w?LP.ago(Date.parse(w.generated)):'–')+' · '+t('flux live','live feed')+' '+(state.esAt?LP.ago(state.esAt):'–');
 }
+async function recompute(){
+  if(!state.worlds||!window.SIM)return;
+  const key=(state.es||[]).filter(e=>e.state==='completed').map(e=>e.match.id).join(',')+'|'+state.worlds.generated;
+  if(key===state.liveKey)return; state.liveKey=key;
+  try{state.liveSim=await SIM.live(state.worlds,state.es,{findEvent:LP.findEvent,utc:LP.utc,sameTeam:LP.sameTeam});}catch(e){console.error(e);state.liveSim=null}
+  if(state.view==='worlds')render();
+}
 async function poll(){
   try{state.es=await LP.esSchedule();state.esAt=Date.now()}catch(e){}
   try{const l=await LP.json('live',true);
     if(!state.worlds||l.version!==state.worlds.generated){state.worlds=await LP.json('worlds',true)}}catch(e){}
+  await recompute();
   tickStatus();if(state.view==='worlds'&&!$('#modal')?.style.display.includes('grid'))render();
 }
 const panel=(title,extra)=>{const p=el('div','panel');const h=el('div','phead');h.append(el('h3',null,title));if(extra)h.append(extra);p.append(h);return p};
@@ -106,9 +115,8 @@ function tableEl(head,rows){const s=el('div','scroll'),tb=el('table');
 
 // ============ WORLDS ============
 function evFor(m){const ev=LP.findEvent(m,state.es||[]);if(!ev)return null;
-  const names=ev.match.teams.map(x=>x.name.toLowerCase().replace(/[^a-z0-9]/g,''));
-  const n1=(m.t1||'').toLowerCase().replace(/[^a-z0-9]/g,'');
-  const flip=n1&&names[1]&&names[1].startsWith(n1.slice(0,4))&&!(names[0]&&names[0].startsWith(n1.slice(0,4)));
+  const tt=ev.match.teams;
+  const flip=!!m.t1&&LP.sameTeam(tt[1].name,m.t1)&&!LP.sameTeam(tt[0].name,m.t1);
   const w=ev.match.teams.map(x=>x.result?x.result.gameWins:null);
   return {state:ev.state,s1:flip?w[1]:w[0],s2:flip?w[0]:w[1],id:ev.match.id,ev}}
 function matchCard(m){
@@ -121,12 +129,14 @@ function matchCard(m){
   const chip=live?`<span class="chip live">● LIVE</span>`:done?`<span class="chip done">${t('Terminé','Final')}</span>`:`<span class="chip up">${LP.fmtTime(ts)}</span>`;
   const known=m.t1&&m.t2;
   const w1=done&&Number(s1)>Number(s2),w2=done&&Number(s2)>Number(s1);
-  const p=m.pred?m.pred.series:null;
+  const LS=state.liveSim,lp=LS&&LS.pred[m.slug],lst=LS&&LS.stakes[m.slug];
+  const p=lp?lp.series:(m.pred?m.pred.series:null);
+  const stk=lst||m.stakes;
   a.innerHTML=`<div class="top"><span>${esc(m.stage==='Play-In'?'Play-In':'Swiss')} · ${esc(m.round||'')}</span><span>Bo${m.bo}</span><span style="margin-left:auto">${chip}</span></div>
     <div class="tr ${w2?'lose':''}"><span>${known?esc(m.t1):t('À déterminer','TBD')}</span><span class="sc">${s1==null?'':s1}</span></div>
     <div class="tr ${w1?'lose':''}"><span>${known?esc(m.t2):t('À déterminer','TBD')}</span><span class="sc">${s2==null?'':s2}</span></div>
     ${p!=null?`<div class="pb"><span style="width:${p*100}%"></span></div><div class="ft"><span>${pct(p)}</span><span>${t('victoire (série)','series win')}</span><span>${pct(1-p)}</span></div>`:''}
-    ${m.stakes?`<div class="ft"><span>${t('Qualif.','Qualif.')} ${pct(m.stakes.qual_now.a)}</span><span>${m.stakes.records.a} · ${m.stakes.records.b}</span><span>${pct(m.stakes.qual_now.b)}</span></div>`:''}`;
+    ${stk?`<div class="ft"><span>${t('Qualif.','Qualif.')} ${pct(stk.qual_now.a)}</span><span>${stk.records.a} · ${stk.records.b}</span><span>${pct(stk.qual_now.b)}</span></div>`:''}`;
   return a;
 }
 function worldsView(){
@@ -149,14 +159,15 @@ function worldsView(){
   wrap.append(p);
   // classement Swiss
   const sp=panel(t('Swiss Stage — classement et chances de qualification','Swiss Stage — standings & qualification odds'));
-  const rows=W.standings.map((s,i)=>{const tr=el('tr'),q=s.w>=3,out=s.l>=3;
+  const ST=state.liveSim?state.liveSim.standings:W.standings;
+  const rows=ST.map((s,i)=>{const tr=el('tr'),q=s.w>=3,out=s.l>=3;
     const top=Object.entries(s.rec||{}).slice(0,2).map(([k,v])=>`${k} ${pct(v)}`).join(' · ');
     tr.innerHTML=`<td class="rk">${i+1}</td><td><b class="lnk" data-team="${ea(s.team)}">${esc(s.team)}</b><span class="tag">${esc(s.region||'')}</span></td>
       <td class="num"><b>${s.w}-${s.l}</b></td>
       <td><div class="qbar"><div class="bar"><span style="width:${(s.qual||0)*100}%;background:${q?'var(--fav)':out?'var(--bad)':'var(--accent)'}"></span></div><b>${q?'✔':out?'✘':pct(s.qual)}</b></div></td>
       <td class="num">${pct(s.title,1)}</td><td class="muted" style="font-size:11px">${top}</td>`;return tr});
   sp.append(tableEl([['#','rk'],[t('Équipe','Team')],[t('Bilan','Record'),'num'],[t('Qualif. top 8','Top-8')],[t('Titre','Title'),'num'],[t('Bilans probables','Likely records')]],rows));
-  sp.append(el('div','note',tx(W.sim.note)+' · '+t('Probabilités tirées de','Probabilities from')+' '+W.sim.n.toLocaleString()+' '+t('simulations, ratings du','simulations, ratings as of')+' '+W.data_through+(W.rating_adjusted_games?` (+${W.rating_adjusted_games} ${t('games Worlds intégrées','Worlds games folded in')})`:'')+'.'));
+  sp.append(Object.assign(el('div','note'),{innerHTML:(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> ${t('avec les résultats officiels','with the official results')} (${state.liveSim.extra} ${t('match(s) pas encore intégré(s) par le serveur','match(es) not yet folded in by the server')}) · ${state.liveSim.n.toLocaleString()} ${t('simulations dans votre navigateur','simulations in your browser')}. `:`${t('Mis à jour par le serveur','Server-updated')} (${W.generated.slice(11,16)} UTC) · ${W.sim.n.toLocaleString()} ${t('simulations','simulations')}. `)+tx(W.sim.note)+' · '+t('ratings du','ratings as of')+' '+W.data_through+'.'}));
   wrap.append(sp);
   // meta du tournoi
   const M=W.meta_worlds.n>=6?W.meta_worlds:W.meta_recent;
@@ -242,10 +253,9 @@ function champs(){
   wrap.append(p);return wrap;
 }
 function predict(){
-  const p=panel(t('Simuler un match — force d\'équipe × rosters × draft','Predict a matchup — team strength × rosters × draft'));
+  const p=panel(t('Simuler un match — force d\'équipe × joueurs × forme × draft','Predict a matchup — team × players × form × draft'));
   const teamsL=[...state.teams].sort((a,b)=>a.team.localeCompare(b.team));
-  const TM=state.tidx,BL=(state.meta.blend||{}),PRE=BL.pre||{w0:0,bt:1,ts_logit:0},POST=BL.post||PRE;
-  const erf=x=>{const tt=1/(1+0.3275911*Math.abs(x));const yy=1-(((((1.061405429*tt-1.453152027)*tt+1.421413741)*tt-0.284496736)*tt+0.254829592)*tt)*Math.exp(-x*x);return x>=0?yy:-yy};
+  const TM=state.tidx,BL=(state.meta.blend||{}),PRE=BL.pre,POST=BL.post||PRE;
   const sig=z=>1/(1+Math.exp(-z));
   const pool=(state.pool&&state.pool.length?state.pool:[]).map(c=>c.champion).sort((a,b)=>a.localeCompare(b));
   const wrap=el('div');wrap.style.padding='16px';
@@ -266,22 +276,21 @@ function predict(){
   ['blue','red'].forEach(side=>{const col=el('div');col.append(el('div','sec',side==='blue'?t('Draft de A (côté bleu)','A draft (blue side)'):t('Draft de B (côté rouge)','B draft (red side)')));
     ROLES.forEach(role=>{const r=el('div');r.style.margin='6px 0';r.append(champSel(side,role));col.append(r)});grid.append(col)});
   draftBox.append(grid);
-  draftToggle.onclick=()=>{const open=draftBox.style.display==='none';draftBox.style.display=open?'block':'none'};
+  draftToggle.onclick=()=>{draftBox.style.display=draftBox.style.display==='none'?'block':'none'};
   const SYN=[['top','jng'],['jng','mid'],['mid','bot'],['bot','sup'],['jng','sup'],['mid','sup'],['jng','bot']];
   function draftEdge(){const dv=state.dv;if(!dv)return null;const B=ROLES.map(r=>picks.blue[r]),R=ROLES.map(r=>picks.red[r]);
     if(B.filter(Boolean).length<5||R.filter(Boolean).length<5)return null;let e=0;
     ROLES.forEach((r,i)=>{const a=B[i],b=R[i];e+=dv.c[r+'|'+a]||0;e-=dv.c[r+'|'+b]||0;const lo=a<=b?a:b,hi=a<=b?b:a;e+=(a===lo?1:-1)*(dv.m[r+'|'+lo+'|'+hi]||0)});
     SYN.forEach(([r1,r2])=>{const i=ROLES.indexOf(r1),j=ROLES.indexOf(r2);e+=dv.s[r1+'|'+r2+'|'+B[i]+'|'+B[j]]||0;e-=dv.s[r1+'|'+r2+'|'+R[i]+'|'+R[j]]||0});return e}
   function go(){
-    const a=selA.value,b=selB.value,bo=+selBo.value,TA=TM[a],TB=TM[b];if(!TA||!TB||a===b){out.innerHTML='';return}
-    const BETA=25/6;let tl=0;
-    if(TA.ts_mu!=null&&TB.ts_mu!=null){const mu=TA.ts_mu-TB.ts_mu,s2=TA.ts_sig**2+TB.ts_sig**2+10*BETA*BETA;let tp=.5*(1+erf(mu/Math.sqrt(2*s2)));tp=Math.min(.999,Math.max(.001,tp));tl=Math.log(tp/(1-tp))}
-    const d=TA.bt-TB.bt,side=BL.bt_side||0;
-    const pB=sig(PRE.w0+PRE.bt*(d+side)+PRE.ts_logit*tl),pR=1-sig(PRE.w0+PRE.bt*(-d+side)+PRE.ts_logit*-tl);
-    let pg=(pB+pR)/2,note=t('Aucune draft saisie : proba avant draft (moyenne des deux côtés).','No draft entered: pre-draft probability (average of both sides).');
+    const a=selA.value,b=selB.value,bo=+selBo.value,TA=TM[a],TB=TM[b];if(!TA||!TB||a===b||!PRE){out.innerHTML='';return}
+    const R={};R[a]={bt:TA.bt,pbt:TA.pbt,fw:TA.fw,ts_mu:TA.ts_mu,ts_sig:TA.ts_sig};R[b]={bt:TB.bt,pbt:TB.pbt,fw:TB.fw,ts_mu:TB.ts_mu,ts_sig:TB.ts_sig};
+    const H=(state.worlds&&state.worlds.h2h)||{};
     const de=draftEdge();
-    if(de!=null){pg=sig(POST.w0+POST.bt*(d+side)+POST.ts_logit*tl+POST.draft*de);note=t('Avec draft : ','With draft: ')+t('A côté bleu · avantage de draft ','A on blue · draft edge ')+(de>=0?'+':'')+de.toFixed(2)+' logit'}
-    const need=Math.floor(bo/2)+1,q=1-pg;let ps=0;for(let k=0;k<need;k++){let c=1;for(let i=0;i<k;i++)c=c*(need-1+k-i)/(i+1);ps+=c*Math.pow(pg,need)*Math.pow(q,k)}
+    let pg,note;
+    if(de!=null){pg=SIM.gameP(a,b,R,BL,H,'post',[{draft:de},{draft:-de}]);note=t('Avec draft : avantage de draft de A ','With draft: A draft edge ')+(de>=0?'+':'')+de.toFixed(2)+' logit'}
+    else{pg=SIM.gameP(a,b,R,BL,H,'pre');note=t('Aucune draft saisie : probabilité avant draft (moyenne des deux côtés).','No draft entered: pre-draft probability (average of both sides).')}
+    const ps=SIM.seriesP(pg,bo);
     out.innerHTML=`<div class="pred">
       <div class="side"><div class="nm">${esc(a)}</div><div class="el">Power ${TA.power} · ${TA.region}</div><div class="wpbig" style="color:var(--fav)">${pct(ps)}</div></div>
       <div class="muted">Bo${bo}<br>${t('série','series')}</div>

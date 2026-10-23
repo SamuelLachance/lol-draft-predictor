@@ -1,11 +1,12 @@
-"""Refit RAPIDE de la force d'equipe (Bradley-Terry a decalage de ligue) apres chaque game.
+"""Refit RAPIDE des signaux de force apres chaque game (job "live", ~30-40 s au lieu de ~25 min).
 
-Meme modele et memes hyperparametres que build_board.py (ml/model_v2.py:BT), mais SANS les boucles
-Elo/TrueSkill (3-4 min) : ~15 s. Le job "live" l'appelle apres avoir ajoute les games du jour au snapshot,
-donc les ratings des equipes (bt, power, dev, decalages de ligue) integrent chaque game jouee.
-Les poids du stack, le TrueSkill des rosters et le modele de draft restent ceux du dernier build complet.
+Refait EXACTEMENT comme build_board.py (memes fonctions, memes hyperparametres) :
+  - bt  : Bradley-Terry d'equipe a decalage de ligue          -> power / bt / dev / decalages de ligue
+  - pbt : Bradley-Terry au niveau joueur (somme du roster)   -> pbt de chaque equipe
+  - fw  : forme ponderee (10 derniers resultats), h2h.json   -> confrontations directes sur 2 ans
+Restent ceux du dernier build complet : poids du stack, TrueSkill des rosters, modele de draft, stats joueurs.
 
-    python ml/refresh_ratings.py            # lit data/board_input.parquet, met a jour web/public/data/{teams,regions,meta}.json
+    python ml/refresh_ratings.py     # lit data/board_input.parquet, met a jour web/public/data/{teams,regions,meta,h2h}.json
 """
 from __future__ import annotations
 import json, sys
@@ -21,7 +22,7 @@ ROLES = ["top", "jng", "mid", "bot", "sup"]
 
 
 def main() -> int:
-    oe = pd.read_parquet(SNAP, columns=["gameid", "side", "position", "teamname", "champion", "result", "league", "date"])
+    oe = pd.read_parquet(SNAP, columns=["gameid", "side", "position", "playername", "teamname", "champion", "result", "league", "date"])
     oe["_date"] = pd.to_datetime(oe.date, errors="coerce")
     cm = st.canon_map(oe)
     oe["teamname"] = oe.teamname.map(lambda x: cm.get(x, x) if isinstance(x, str) else x)
@@ -38,15 +39,27 @@ def main() -> int:
                       "y": blue.loc[idx, "result"].astype(float).values})
     G = G.dropna(subset=["date", "blue", "red", "y"]).sort_values("date").reset_index(drop=True)
     G["y"] = G.y.astype(int)
+    pgl = st.player_lists(oe[oe.gameid.isin(set(G.gameid))])
+    G["bp"] = [pgl.get(g, {}).get("bp") for g in G.gameid]; G["rp"] = [pgl.get(g, {}).get("rp") for g in G.gameid]
+    G["has_pl"] = [bool(a) and all(a) and bool(b) and all(b) for a, b in zip(G.bp, G.rp)]
     home = st.home_groups(G)
     asof = G.date.max() + pd.Timedelta(days=1)
     rating, side, off = st.fit_bt(G, asof, home, **mv.BT)
+    pr, tdev, poff, pside = st.fit_pbt(G, asof, home, **mv.PBT)
 
     teams = json.load(open(OUT / "teams.json", encoding="utf-8"))
+    names = {t["team"] for t in teams}
     for t in teams:
         r = rating(t["team"]); g_ = t["region"]
         t["bt"] = round(float(r), 4); t["power"] = round(st.to_elo(r))
         t["lg_off"] = round(st.to_elo(off.get(g_, 0.0)) - 1500); t["dev"] = round(st.to_elo(r) - st.to_elo(off.get(g_, 0.0)))
+        rpl = [x["player"] for x in (t.get("roster") or [])]
+        t["pbt"] = round(float(poff.get(g_, 0.0) + tdev.get(t["team"], 0.0) + sum(pr.get(p, 0.0) for p in rpl)), 4)
+        mask = (G.blue == t["team"]) | (G.red == t["team"])
+        res = [int(w) for w in G.y.where(G.blue == t["team"], 1 - G.y)[mask].tail(10)]
+        t["fw"] = st.form_weighted(res)
+        if res:
+            t["form"] = f"{sum(res)}-{len(res) - sum(res)}"
     teams.sort(key=lambda t: -t["power"])
     json.dump(teams, open(OUT / "teams.json", "w", encoding="utf-8"), ensure_ascii=False)
     regions = []
@@ -54,11 +67,18 @@ def main() -> int:
         pw = [t["power"] for t in teams if t["region"] == k]
         regions.append({"region": k, "rating": round(st.to_elo(off.get(k, 0.0))), "mean_team_elo": round(float(np.mean(pw))) if pw else None, "n": len(pw)})
     json.dump(regions, open(OUT / "regions.json", "w", encoding="utf-8"), ensure_ascii=False)
+    # confrontations directes (2 ans)
+    h2h = {}
+    for r in G[G.date >= asof - pd.Timedelta(days=730)].itertuples():
+        if r.blue in names and r.red in names:
+            e = h2h.setdefault("|".join(sorted((r.blue, r.red))), {"n": 0, "w": {}}); e["n"] += 1
+            w = r.blue if r.y else r.red; e["w"][w] = e["w"].get(w, 0) + 1
+    json.dump(h2h, open(OUT / "h2h.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
     meta = json.load(open(OUT / "meta.json", encoding="utf-8"))
     meta["data_through"] = str(G.date.max().date()); meta["data_through_ts"] = str(G.date.max())
-    meta["blend"]["bt_side"] = float(side); meta["refit_at"] = str(pd.Timestamp.utcnow())[:19]
+    meta["blend"]["bt_side"] = float(side); meta["blend"]["pbt_side"] = float(pside); meta["refit_at"] = str(pd.Timestamp.now(tz="UTC"))[:19]
     json.dump(meta, open(OUT / "meta.json", "w", encoding="utf-8"), ensure_ascii=False)
-    print(f"refit BT: {len(G)} games jusqu'a {G.date.max()} | {len(teams)} equipes | top: {[(t['team'], t['power']) for t in teams[:5]]}")
+    print(f"refit: {len(G)} games jusqu'a {G.date.max()} | {len(teams)} equipes | top: {[(t['team'], t['power']) for t in teams[:5]]}")
     return 0
 
 
