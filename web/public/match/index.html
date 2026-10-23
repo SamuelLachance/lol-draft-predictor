@@ -4,16 +4,16 @@
 <title>Match — Worlds 2026 · LoL Esports Predictor</title>
 <link rel="stylesheet" href="../common.css">
 </head>
-<body data-base="../"><div class="wrap">
-<header>
-  <a class="tab" href="../#tab=worlds" style="text-decoration:none" id="back"></a>
-  <div style="min-width:0"><h1 id="title">…</h1><div class="sub" id="sub"></div></div>
-  <div class="spacer"></div>
-  <span id="hbtn"></span>
+<body data-base="../">
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="tab" href="../#tab=worlds" id="back"></a>
+    <div class="brand" style="flex:1 1 220px"><div style="min-width:0"><h1 id="title">…</h1><div class="sub" id="sub"></div></div></div>
+    <span id="hbtn" style="display:flex;gap:8px"></span>
+  </div>
 </header>
-<div id="view" style="margin-top:16px"></div>
-<footer id="foot"></footer>
-</div>
+<main class="wrap"><div id="view"></div><footer id="foot"></footer></main>
+
 <script src="../common.js"></script>
 <script src="../sim.js"></script>
 <script src="../cards.js"></script>
@@ -36,7 +36,7 @@ async function recompute(){
 }
 
 async function boot(){
-  $('#hbtn').append(LP.langBtn(),' ',LP.themeBtn());
+  $('#hbtn').append(LP.langBtn(),LP.themeBtn());
   S.slug=decodeURIComponent(location.hash.slice(1));
   window.addEventListener('hashchange',()=>{S.slug=decodeURIComponent(location.hash.slice(1));S.details=null;S.win=null;pollAll()});
   document.addEventListener('lp:lang',render);
@@ -64,15 +64,14 @@ function render(){
   if(!m){v.innerHTML=`<div class="err">${t('Match introuvable','Match not found')} : ${esc(S.slug)}</div>`;return}
   v.innerHTML='';
   v.append(el('div',null,'<div id="top"></div>'));v.append(el('div',null,'<div id="liveblock"></div>'));
+  const R=(...ps)=>{const r=el('div','row');ps.filter(Boolean).forEach(p=>r.append(p));return r};
   if(m.pred){
-    v.append(probPanel(m));
-    if(STAKES(m))v.append(stakesPanel(m));
+    v.append(R(probPanel(m),STAKES(m)?stakesPanel(m):null));
     if(m.games&&m.games.length)v.append(gamesPanel(m));
     v.append(contestedPanel(m));
     v.append(draftOutlook(m));
     v.append(identityPanel(m));
-    v.append(duelsPanel(m));
-    v.append(formPanel(m));
+    v.append(R(duelsPanel(m),formPanel(m)));
   }else{
     v.append(el('div','panel',`<div class="pbody">${t('Les équipes de ce match ne sont pas encore connues (ou hors modèle). La page se complétera automatiquement dès que le tableau est fixé.','The teams for this match aren\'t known yet (or are outside the model). The page fills in automatically once the bracket is set.')}</div>`));
     if(m.games&&m.games.length)v.append(gamesPanel(m));
@@ -95,11 +94,12 @@ function renderTop(){
   const chip=st==='inProgress'?'<span class="chip live">● LIVE</span>':st==='completed'?`<span class="chip done">${t('Terminé','Final')}</span>`:`<span class="chip up">${LP.fmtDay(ts)} · ${LP.fmtTime(ts)}</span>`;
   const p=PRED(m);
   const A=m.t1,B=m.t2;
-  top.innerHTML=`<div class="panel"><div class="hero">
+  top.innerHTML=`<div class="panel hl"><div class="hero">
     <div style="flex:1;min-width:140px;text-align:right"><div class="big ${st==='completed'&&Number(s1)<Number(s2)?'muted':''}">${A?LPC.team(A,{b:false}):'TBD'}</div></div>
     <div style="text-align:center"><div class="big" style="font-variant-numeric:tabular-nums">${s1==null?'–':s1} : ${s2==null?'–':s2}</div><div>${chip}</div><div class="muted" style="font-size:11px" id="cd"></div></div>
     <div style="flex:1;min-width:140px"><div class="big ${st==='completed'&&Number(s2)<Number(s1)?'muted':''}">${B?LPC.team(B,{b:false}):'TBD'}</div></div>
-    ${p?`<div style="flex-basis:100%"><div class="wpbar" style="margin:6px 0 0"><span style="width:${p.series*100}%"></span></div><div class="ft" style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px"><b>${pct(p.series,1)}</b><span class="muted">${t('probabilité de gagner la série (avant draft)','series win probability (pre-draft)')}${p.live?' · <b style="color:var(--accent)">● '+t('recalculée en direct','recomputed live')+'</b>':''}</span><b>${pct(1-p.series,1)}</b></div></div>`:''}
+    ${p?`<div style="flex-basis:100%"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-weight:900;font-size:clamp(1.4rem,2.6vw,2.4rem);font-variant-numeric:tabular-nums"><span class="bluet">${pct(p.series,1)}</span><span class="muted" style="font-size:.8rem;font-weight:600;text-align:center">${t('probabilité de gagner la série (avant draft)','series win probability (pre-draft)')}${p.live?' · <b style="color:var(--accent)">● '+t('recalculée en direct','recomputed live')+'</b>':''}</span><span class="redt">${pct(1-p.series,1)}</span></div><div class="wpbar" style="margin:8px 0 0"><span style="width:${p.series*100}%"></span></div></div>
+    <div class="facts" style="flex:1 1 100%">${(p.factors||[]).slice(0,5).map(f=>`<div class="fact"><div class="k">${esc(tx(f.t))}</div><div class="v"><span class="bluet">${esc(f.a==null?'–':f.a)}</span><span class="redt">${esc(f.b==null?'–':f.b)}</span></div></div>`).join('')}</div>`:''}
     ${m.stream?`<div style="flex-basis:100%;text-align:center"><a href="${ea(m.stream)}" target="_blank" rel="noopener">▶ ${t('Regarder le match','Watch the match')}</a></div>`:''}
   </div></div>`;
 }

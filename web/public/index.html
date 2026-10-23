@@ -5,19 +5,15 @@
 <meta name="description" content="Prédictions, ratings et analyse de draft pour les Worlds 2026 de League of Legends — page dédiée par match, mise à jour en direct.">
 <link rel="stylesheet" href="common.css">
 </head>
-<body data-base=""><div class="wrap">
-<header>
-  <div class="logo">LP</div>
-  <div><h1>LoL Esports Predictor</h1><div class="sub" id="sub">…</div></div>
-  <div class="spacer"></div>
-  <span id="hbtn"></span>
+<body data-base="">
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand"><div class="logo">LP</div><div style="min-width:0"><h1>LoL Esports Predictor</h1><div class="sub" id="sub">…</div></div></div>
+    <span id="hbtn" style="display:flex;gap:8px"></span>
+  </div>
+  <nav class="tabs" id="tabs"></nav>
 </header>
-
-<div class="cards" id="cards"></div>
-<nav class="tabs" id="tabs"></nav>
-<div id="view"></div>
-<footer id="foot"></footer>
-</div>
+<main class="wrap"><div id="view"></div><footer id="foot"></footer></main>
 
 <script src="common.js"></script>
 <script src="sim.js"></script>
@@ -43,10 +39,10 @@ async function boot(){
   LPC.init({teams:state.teams,players:state.players,regions:state.regions,worlds:state.worlds});
   document.addEventListener('lp:lang',()=>{shell();cards();render()});
   if(location.hash.startsWith('#tab=')){const v=location.hash.slice(5);if(TABS().some(x=>x[0]===v)){state.view=v;shell();render()}}
-  poll(); setInterval(poll,30000); setInterval(tickStatus,15000);
+  poll(); setInterval(poll,30000); setInterval(tickStatus,15000); setInterval(tickCd,1000);
 }
 function shell(){
-  $('#hbtn').innerHTML='';$('#hbtn').append(LP.langBtn(),' ',LP.themeBtn());
+  $('#hbtn').innerHTML='';$('#hbtn').append(LP.langBtn(),LP.themeBtn());
   const tabs=$('#tabs');tabs.innerHTML='';
   TABS().forEach(([k,l])=>{const b=el('button','tab'+(k===state.view?' on':''),l);b.dataset.v=k;
     b.onclick=()=>{state.view=k;history.replaceState(null,'','#tab='+k);[...tabs.children].forEach(x=>x.classList.toggle('on',x===b));render()};tabs.append(b)});
@@ -64,15 +60,16 @@ function buildIndexes(){
     state.roleStats[ro]={gd15:col(p=>p.gd15),kp:col(p=>p.kp),kda:col(p=>p.kda),dmg:col(p=>p.dmg||0)};
   });
 }
-function cards(){
-  const m=state.meta,w=state.worlds,mm=(m.metrics||{})['pre-draft']||{},old=(m.metrics||{}).elo_seq_ancien||{};
-  const c=$('#cards');c.innerHTML='';
-  const data=[[t('Données jusqu\'au','Data through'),(m.data_through||m.updated)+(m.n_games?` <small>${m.n_games.toLocaleString()} games</small>`:'')],
-    [t('Précision walk-forward (avant draft)','Walk-forward accuracy (pre-draft)'),pct(mm.acc,1)+` <small>${t('post-draft','post-draft')} ${pct(((m.metrics||{})['post-draft']||{}).acc,1)} · ${t('ancien','old')} ${pct(old.acc,1)}</small>`],
-    [t('Log-loss','Log-loss'),(mm.logloss||'–')+` <small>${t('ancien','old')} ${old.logloss||'–'}</small>`],
-    [t('Équipes majeures','Major teams'),m.n_teams],[t('Joueurs','Players'),m.n_players]];
-  data.forEach(([k,v])=>{const d=el('div','card');d.append(el('div','k',k),el('div','v',v));c.append(d)});
-  $('#sub').innerHTML=`<span class="livedot off" id="dot"></span><span id="stat"></span>`;tickStatus();
+function cards(){ $('#sub').innerHTML=`<span class="livedot off" id="dot"></span><span id="stat"></span>`;tickStatus() }
+function kpiStrip(){
+  const m=state.meta,mm=(m.metrics||{})['pre-draft']||{},po=(m.metrics||{})['post-draft']||{},old=(m.metrics||{}).elo_seq_ancien||{};
+  const w=el('div','strip');
+  [[t('Précision (avant draft)','Accuracy (pre-draft)'),pct(mm.acc,1),`${t('après draft','post-draft')} ${pct(po.acc,1)} · ${t('ancien modèle','old model')} ${pct(old.acc,1)}`],
+   ['Log-loss',mm.logloss||'–',`${t('ancien','old')} ${old.logloss||'–'}`],
+   [t('Données jusqu\'au','Data through'),m.data_through||m.updated||'–',m.n_games?`${m.n_games.toLocaleString()} games`:''],
+   [t('Équipes · joueurs','Teams · players'),`${m.n_teams||'–'} · ${m.n_players||'–'}`,t('ligues majeures actives','active major leagues')]].forEach(([k,v,sm])=>{
+    const d=el('div','kpi');d.innerHTML=`<div class="k">${k}</div><div class="v">${v} <small>${sm}</small></div>`;w.append(d)});
+  return w;
 }
 function tickStatus(){
   const s=$('#stat');if(!s)return;const w=state.worlds,live=(state.es||[]).filter(e=>e.state==='inProgress').length;
@@ -92,7 +89,7 @@ async function poll(){
   try{const l=await LP.json('live',true);
     if(!state.worlds||l.version!==state.worlds.generated){state.worlds=await LP.json('worlds',true);LPC.update({worlds:state.worlds})}}catch(e){}
   await recompute();
-  tickStatus();if(state.view==='worlds'&&!$('#modal')?.style.display.includes('grid'))render();
+  tickStatus();if(state.view==='worlds'&&$('#modal')?.style.display!=='flex')render();
 }
 const panel=(title,extra)=>{const p=el('div','panel');const h=el('div','phead');h.append(el('h3',null,title));if(extra)h.append(extra);p.append(h);return p};
 const filterBar=(opts,cur,on)=>{const w=el('div');w.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
@@ -117,7 +114,7 @@ function matchCard(m){
   const started=st!=='unstarted';
   const s1=started?(o&&o.s1!=null?o.s1:m.s1):null,s2=started?(o&&o.s2!=null?o.s2:m.s2):null;
   const done=st==='completed',live=st==='inProgress';
-  const a=el('a','mc');a.href='match/#'+(m.slug||'');
+  const a=el('a','mc'+(live?' live':''));a.href='match/#'+(m.slug||'');
   const ts=LP.utc(m.date);
   const chip=live?`<span class="chip live">● LIVE</span>`:done?`<span class="chip done">${t('Terminé','Final')}</span>`:`<span class="chip up">${LP.fmtTime(ts)}</span>`;
   const known=m.t1&&m.t2;
@@ -132,37 +129,78 @@ function matchCard(m){
     ${stk?`<div class="ft"><span>${t('Qualif.','Qualif.')} ${pct(stk.qual_now.a)}</span><span>${stk.records.a} · ${stk.records.b}</span><span>${pct(stk.qual_now.b)}</span></div>`:''}`;
   return a;
 }
+const stOf=m=>{const o=evFor(m);return o?o.state:(m.status==='completed'?'completed':'unstarted')};
+function tickCd(){const c=$('#spotcd');if(!c)return;const d=+c.dataset.ts-Date.now();
+  if(!(+c.dataset.ts)||d<=-1e9){c.textContent='';return}
+  if(d<=0){c.textContent=t('Début imminent','Starting soon');return}
+  const h=Math.floor(d/3.6e6),mi=Math.floor(d%3.6e6/6e4),s=Math.floor(d%6e4/1e3);
+  c.textContent=(h?h+'h ':'')+String(mi).padStart(2,'0')+'m '+String(s).padStart(2,'0')+'s'}
+function spotMatch(W){
+  const known=W.matches.filter(m=>m.t1&&m.t2);
+  const live=known.find(m=>stOf(m)==='inProgress');if(live)return{m:live,kind:'live'};
+  const up=known.filter(m=>stOf(m)==='unstarted').sort((a,b)=>LP.utc(a.date)-LP.utc(b.date))[0];if(up)return{m:up,kind:'next'};
+  const done=known.filter(m=>stOf(m)==='completed').pop();return done?{m:done,kind:'last'}:null;
+}
+function spotlight(W){
+  const sm=spotMatch(W);if(!sm)return null;const{m,kind}=sm,o=evFor(m),LS=state.liveSim,lp=LS&&LS.pred[m.slug],stk=(LS&&LS.stakes[m.slug])||m.stakes;
+  const p=lp?lp.series:(m.pred?m.pred.series:null),A=state.tidx[m.t1],B=state.tidx[m.t2],started=kind!=='next';
+  const s1=started?(o&&o.s1!=null?o.s1:m.s1):null,s2=started?(o&&o.s2!=null?o.s2:m.s2):null,ts=LP.utc(m.date);
+  const lab=kind==='live'?`<span class="chip live">● LIVE</span>`:kind==='next'?`<span class="chip up">${t('Prochain match','Next match')}</span>`:`<span class="chip done">${t('Dernier résultat','Latest result')}</span>`;
+  const sub=T=>T?`<small>Power ${T.power} · ${T.region} · L10 ${T.form}</small>`:'';
+  const sp=el('div','spot'+(kind==='live'?' live':''));
+  const fact=(k,a_,b_)=>`<div class="fact"><div class="k">${k}</div><div class="v"><span class="bluet">${a_}</span><span class="redt">${b_}</span></div></div>`;
+  sp.innerHTML=`<div class="top">${lab}<b>${esc(m.stage==='Play-In'?'Play-In':'Swiss')} · ${esc(m.round||'')}</b><span>Bo${m.bo}</span><span>${LP.fmtDay(ts)} · ${LP.fmtTime(ts)}</span><span class="cd" id="spotcd" data-ts="${kind==='next'?ts:0}"></span></div>
+    <div class="teams"><div class="tm">${LPC.team(m.t1,{b:false})}${sub(A)}</div><div class="vs">${started?`${s1==null?0:s1} – ${s2==null?0:s2}`:'VS'}</div><div class="tm r">${LPC.team(m.t2,{b:false})}${sub(B)}</div></div>
+    ${p!=null?`<div><div class="pnum"><span>${pct(p,1)}</span><span class="muted" style="font-size:.78rem;font-weight:600;align-self:center">${t('victoire de la série (avant draft)','series win (pre-draft)')}</span><span>${pct(1-p,1)}</span></div><div class="pbar"><span style="width:${p*100}%"></span></div></div>`:''}
+    <div class="facts">${stk?fact(t('Qualification top 8','Top-8 odds'),pct(stk.qual_now.a),pct(stk.qual_now.b))+fact(t('Bilan Swiss','Swiss record'),stk.records.a,stk.records.b)
+      +(stk.if?fact(t('Si victoire → qualif.','If win → top-8'),pct(stk.if.a_win.a),pct(stk.if.b_win.b)):''):''}
+      ${A&&B?fact(t('Force (power)','Strength (power)'),A.power,B.power):''}${m.pred&&m.pred.h2h&&m.pred.h2h.games?fact('H2H',m.pred.h2h.a_wins,m.pred.h2h.games-m.pred.h2h.a_wins):''}</div>
+    <a class="cta" href="match/#${esc(m.slug||'')}">${t('Page du match','Match page')} →</a>`;
+  return sp;
+}
+function oddsPanel(W){
+  const ST=(state.liveSim?state.liveSim.standings:W.standings).slice().sort((a,b)=>(b.title||0)-(a.title||0)).slice(0,8),mx=Math.max(...ST.map(s=>s.title||0),.01);
+  const p=panel(t('Favoris du titre','Title favourites'));p.classList.add('hl','odds');
+  const b=el('div','pbody');
+  b.innerHTML=ST.map(s=>`<div class="orow"><span class="nm">${LPC.team(s.team,{b:false})}</span><div class="bar"><span style="width:${(s.title||0)/mx*100}%"></span></div><span class="pc">${pct(s.title)}</span><span class="pc2">${s.w>=3?'✔ top 8':s.l>=3?'✘':'top 8 '+pct(s.qual)}</span></div>`).join('');
+  p.append(b);p.append(el('div','note',(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> · `:'')+`${(state.liveSim?state.liveSim.n:W.sim.n).toLocaleString()} ${t('simulations — règles officielles du Swiss','simulations — official Swiss rules')}`));
+  return p;
+}
 function worldsView(){
   const W=state.worlds,wrap=el('div');
   if(!W){wrap.append(el('div','err',t('Données Worlds indisponibles pour le moment.','Worlds data unavailable right now.')));return wrap}
-  const me=W.matches.filter(m=>m.stage==='Main Event'),all=W.matches;
+  const all=W.matches;
+  const nLive=all.filter(m=>stOf(m)==='inProgress').length;
+  wrap.append(Object.assign(el('div','sectitle'),{innerHTML:`Worlds 2026 <small>${t('Swiss Stage · Allen (Texas) · du 23 au 31 octobre, puis quarts, demies et finale','Swiss Stage · Allen (Texas) · Oct 23–31, then quarterfinals, semifinals and final')}${nLive?` · <b class="no">● ${nLive} ${t('en direct','live')}</b>`:''}</small>`}));
+  const hh=el('div','heroH'),sp=spotlight(W);if(sp)hh.append(sp);hh.append(oddsPanel(W));wrap.append(hh);
+  wrap.append(kpiStrip());
+  // --- matchs
   const bar=filterBar([['up',t('À venir / en direct','Upcoming / live')],['done',t('Terminés','Completed')],['all',t('Tous','All')]],state.wFilter,k=>{state.wFilter=k;render()});
-  const p=panel(t('Matchs — cliquez pour la page dédiée','Matches — click for the dedicated page'),bar);
-  const stOf=m=>{const o=evFor(m);return o?o.state:(m.status==='completed'?'completed':'unstarted')};
+  const p=panel(t('Tous les matchs — cliquez pour la page dédiée','All matches — click for the dedicated page'),bar);
   let list=all.filter(m=>state.wFilter==='all'||(state.wFilter==='done'?stOf(m)==='completed':stOf(m)!=='completed'));
   if(state.wFilter==='done')list=list.slice().reverse();
   let hidden=0;if(state.wFilter==='up'){const k=list.filter(m=>m.t1&&m.t2||stOf(m)!=='unstarted');hidden=list.length-k.length;list=k}
   list=list.slice(0,state.wFilter==='all'?60:36);
-  let cur='';const grid=[];let g=null;
+  let cur='',g=null;
   list.forEach(m=>{const d=LP.fmtDay(LP.utc(m.date));
     if(d!==cur){cur=d;p.append(el('div','day',d));g=el('div','mgrid');p.append(g)}
     g.append(matchCard(m))});
   if(!list.length)p.append(el('div','note',t('Aucun match dans cette vue.','No match in this view.')));
   if(hidden)p.append(el('div','note',t(`${hidden} matchs suivants (équipes à déterminer) apparaîtront automatiquement dès que les affiches seront connues — voir « Tous ».`,`${hidden} later matches (teams TBD) will appear automatically once the pairings are set — see “All”.`)));
   wrap.append(p);
-  // classement Swiss
-  const sp=panel(t('Swiss Stage — classement et chances de qualification','Swiss Stage — standings & qualification odds'));
+  // --- classement Swiss
+  const sp2=panel(t('Swiss Stage — classement et chances de qualification','Swiss Stage — standings & qualification odds'));
   const ST=state.liveSim?state.liveSim.standings:W.standings;
   const rows=ST.map((s,i)=>{const tr=el('tr'),q=s.w>=3,out=s.l>=3;
     const top=Object.entries(s.rec||{}).slice(0,2).map(([k,v])=>`${k} ${pct(v)}`).join(' · ');
     tr.innerHTML=`<td class="rk">${i+1}</td><td><b class="lnk" data-team="${ea(s.team)}">${esc(s.team)}</b><span class="tag">${esc(s.region||'')}</span></td>
       <td class="num"><b>${s.w}-${s.l}</b></td>
       <td data-sort="${q?1.01:out?-1:(s.qual||0)}"><div class="qbar"><div class="bar"><span style="width:${(s.qual||0)*100}%;background:${q?'var(--fav)':out?'var(--bad)':'var(--accent)'}"></span></div><b>${q?'✔':out?'✘':pct(s.qual)}</b></div></td>
-      <td class="num">${pct(s.title,1)}</td><td class="muted" style="font-size:11px">${top}</td>`;return tr});
-  sp.append(tableEl([['#','rk'],[t('Équipe','Team')],[t('Bilan','Record'),'num'],[t('Qualif. top 8','Top-8')],[t('Titre','Title'),'num'],[t('Bilans probables','Likely records')]],rows));
-  sp.append(Object.assign(el('div','note'),{innerHTML:(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> ${t('avec les résultats officiels','with the official results')} (${state.liveSim.extra} ${t('match(s) pas encore intégré(s) par le serveur','match(es) not yet folded in by the server')}) · ${state.liveSim.n.toLocaleString()} ${t('simulations dans votre navigateur','simulations in your browser')}. `:`${t('Mis à jour par le serveur','Server-updated')} (${W.generated.slice(11,16)} UTC) · ${W.sim.n.toLocaleString()} ${t('simulations','simulations')}. `)+tx(W.sim.note)+' · '+t('ratings du','ratings as of')+' '+W.data_through+'.'}));
-  wrap.append(sp);
-  // meta du tournoi
+      <td class="num">${pct(s.title,1)}</td><td class="muted" style="font-size:.72rem">${top}</td>`;return tr});
+  sp2.append(tableEl([['#','rk'],[t('Équipe','Team')],[t('Bilan','Record'),'num'],[t('Qualif. top 8','Top-8')],[t('Titre','Title'),'num'],[t('Bilans probables','Likely records')]],rows));
+  sp2.append(Object.assign(el('div','note'),{innerHTML:(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> ${t('avec les résultats officiels','with the official results')} (${state.liveSim.extra} ${t('match(s) pas encore intégré(s) par le serveur','match(es) not yet folded in by the server')}) · ${state.liveSim.n.toLocaleString()} ${t('simulations dans votre navigateur','simulations in your browser')}. `:`${t('Mis à jour par le serveur','Server-updated')} (${W.generated.slice(11,16)} UTC) · ${W.sim.n.toLocaleString()} ${t('simulations','simulations')}. `)+tx(W.sim.note)+' · '+t('ratings du','ratings as of')+' '+W.data_through+'.'}));
+  wrap.append(sp2);
+  // --- meta du tournoi
   const M=W.meta_worlds.n>=6?W.meta_worlds:W.meta_recent;
   const mp=panel(t('Champions les plus contestés','Most contested champions')+' — '+M.since+` (${M.n} games)`);
   mp.append(champTable(M.rows.slice(0,12)));wrap.append(mp);
@@ -309,9 +347,9 @@ function predict(){
   const picks={blue:{},red:{}};
   const champSel=(side,role)=>{const s=el('select');s.style.minWidth='140px';s.append(new Option('— '+RN[role]+' —',''));
     pool.forEach(c=>s.append(new Option(c,c)));s.onchange=()=>{picks[side][role]=s.value;go()};return s};
-  const grid=el('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:18px';
+  const grid=el('div');grid.style.cssText='display:flex;flex-wrap:wrap;gap:18px';
   ['blue','red'].forEach(side=>{const col=el('div');col.append(el('div','sec',side==='blue'?t('Draft de A (côté bleu)','A draft (blue side)'):t('Draft de B (côté rouge)','B draft (red side)')));
-    ROLES.forEach(role=>{const r=el('div');r.style.margin='6px 0';r.append(champSel(side,role));col.append(r)});grid.append(col)});
+    col.style.cssText='flex:1 1 240px';ROLES.forEach(role=>{const r=el('div');r.style.margin='6px 0';r.append(champSel(side,role));col.append(r)});grid.append(col)});
   draftBox.append(grid);
   draftToggle.onclick=()=>{draftBox.style.display=draftBox.style.display==='none'?'block':'none'};
   const SYN=[['top','jng'],['jng','mid'],['mid','bot'],['bot','sup'],['jng','sup'],['mid','sup'],['jng','bot']];

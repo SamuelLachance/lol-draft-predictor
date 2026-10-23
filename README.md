@@ -91,6 +91,8 @@ En local (IP résidentielle) : `update_board.ps1` fait la même chose et déploi
 cd web/public && python -m http.server 8765      # site statique : index.html, match/
 ```
 
+Interface : pleine largeur, 100 % flexbox (aucune grille CSS), fluide du mobile (320 px) au grand écran ; barre du haut collante, section « à la une » (match en direct / prochain match avec compte à rebours, favoris du titre), tableaux triables, fiches équipe/joueur partout.
+
 (`web/src` = ancienne appli Next.js, non utilisée par le site publié.)
 
 ## Limites assumées

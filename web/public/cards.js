@@ -28,7 +28,7 @@
         else if (tm) { e.preventDefault(); e.stopPropagation(); LPC.open({ type: 'team', name: tm.dataset.team }) }
       }, true);
       document.addEventListener('keydown', e => { if (e.key === 'Escape') LPC.close() });
-      document.addEventListener('lp:lang', () => { const m = document.getElementById('modal'); if (m && m.style.display === 'grid' && S.stack.length) LPC.open(S.stack[S.stack.length - 1], false) });
+      document.addEventListener('lp:lang', () => { const m = document.getElementById('modal'); if (m && m.style.display === 'flex' && S.stack.length) LPC.open(S.stack[S.stack.length - 1], false) });
     }
   };
   LPC.update = d => { Object.assign(S, d) };
@@ -41,7 +41,7 @@
     if (!m) { m = el('div', 'modal-bg'); m.id = 'modal'; document.body.append(m); m.addEventListener('click', e => { if (e.target === m) LPC.close() }) }
     m.innerHTML = ''; const sheet = el('div', 'sheet'); sheet.style.maxWidth = '720px';
     sheet.append(ref.type === 'player' ? playerCard(ref) : teamCard(ref.name));
-    m.append(sheet); m.style.display = 'grid'; m.scrollTop = 0; LP.hydrate(m);
+    m.append(sheet); m.style.display = 'flex'; m.scrollTop = 0; LP.hydrate(m);
   };
   const back = () => { const b = el('button', 'mx', '‹'); b.title = 'Back'; b.onclick = () => { S.stack.pop(); const prev = S.stack[S.stack.length - 1]; prev ? LPC.open(prev, false) : LPC.close() }; return b };
   const closeX = () => { const b = el('button', 'mx', '✕'); b.style.marginLeft = 'auto'; b.onclick = LPC.close; return b };
