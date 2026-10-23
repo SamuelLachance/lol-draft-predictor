@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 import trueskill as ts
 import sys; sys.path.insert(0,str(Path(__file__).resolve().parent))
-import strength as st, draftmodel as dm, model_v2 as mv, features as ft
+import strength as st, draftmodel as dm, model_v2 as mv, features as ft, rapm
 ROOT=Path(__file__).resolve().parents[1]; PROC=ROOT/"data"/"processed"; OUT=ROOT/"web"/"public"/"data"; OUT.mkdir(parents=True,exist_ok=True)
 MODEL_OUT=ROOT/"web"/"public"/"model"; MODEL_OUT.mkdir(parents=True,exist_ok=True)
 ROLES=["top","jng","mid","bot","sup"]
@@ -84,6 +84,21 @@ def main():
     rating, bt_side, off = st.fit_bt(G, asof, home, **mv.BT)
     pr_, tdev_, poff_, pbt_side = st.fit_pbt(G, asof, home, **mv.PBT)
     dmod = mv.fit_draft(G, asof)
+    # RAPM champion : effet net (controle equipe + 10 joueurs + maitrise) -> "valeur cachee"
+    WFs = WF.sort_values("date").reset_index(drop=True)
+    bcR = WFs[[f"blue_{r}" for r in ROLES]].astype(str).values; rcR = WFs[[f"red_{r}" for r in ROLES]].astype(str).values
+    bpR, rpR = WFs.bp.to_numpy(), WFs.rp.to_numpy(); hasR = WFs.has_pl.to_numpy()
+    mbR, mrR = rapm.mastery(bpR, rpR, bcR, rcR, hasR)
+    fit_idx = np.where(hasR & WFs.bt.notna().to_numpy() & WFs.league.isin(set(st.GROUP) | st.INTL).to_numpy() & (WFs.date >= "2021-06-01").to_numpy())[0]
+    rv, rco = rapm.fit(WFs.bt.to_numpy(), WFs.y.to_numpy(), WFs.date.to_numpy(), bpR, rpR, bcR, rcR, mbR, mrR, fit_idx)
+    rtab = rapm.champion_table(rv, rco)
+    # effet ajuste evalue a la maitrise TYPIQUE du champion (comparable au winrate brut, qui melange tous les niveaux de maitrise)
+    msum, mcnt = defaultdict(float), defaultdict(int)
+    for i_ in np.where(hasR & (WFs.date >= "2025-01-01").to_numpy() & WFs.league.isin(TIER1).to_numpy())[0]:
+        for k_ in range(5):
+            msum[bcR[i_, k_]] += mbR[i_, k_]; mcnt[bcR[i_, k_]] += 1; msum[rcR[i_, k_]] += mrR[i_, k_]; mcnt[rcR[i_, k_]] += 1
+    mean_m = {c_: msum[c_] / mcnt[c_] for c_ in mcnt}
+    radj = {(r_.role, r_.champion): (r_.adj + (r_.learn or 0.0) * mean_m.get(r_.champion, 0.0), r_.learn) for r_ in rtab.itertuples()}
     grp = lambda t: home.get(t, "?")
     reg = lambda t: grp(t) if grp(t) in st.MAJOR else "OTHER"
     pw = lambda t: st.to_elo(rating(t))
@@ -211,12 +226,21 @@ def main():
     cc2=recent.groupby(["champion","position"]).agg(games=("result","count"),wr=("result","mean"),gd15=("golddiffat15","mean")).reset_index()
     cc2=cc2[cc2.games>=10]
     champs=[]
+    _w=[(radj[(r_.position,r_.champion)][0],r_.games) for r_ in cc2.itertuples() if (r_.position,r_.champion) in radj]
+    adj_center=sum(a*g_ for a,g_ in _w)/max(1,sum(g_ for _,g_ in _w))      # recentrage : effet moyen pondere = 0 (comme le winrate brut moyen)
     for r in cc2.itertuples():
         cr=CR.get(r.champion)
+        a_, l_ = radj.get((r.position, r.champion), (None, None))
+        if a_ is not None: a_ = a_ - adj_center
+        sg_ = lambda z: (1 / (1 + math.exp(-z)) - .5) * 100
+        raw_ = ((float(r.wr) * r.games + 10 * .5) / (r.games + 10) - .5) * 100       # winrate brut shrinke (ce que voit la communaute)
         champs.append({"champion":r.champion,"role":r.position,"ts":round(cr.mu-3*cr.sigma,1) if cr else 25.0,
             "dv":dv["c"].get(f"{r.position}|{r.champion}",0.0),
+            "adj":round(a_,3) if a_ is not None else None,"adj_pts":round(sg_(a_),1) if a_ is not None else None,
+            "learn15":round(sg_(l_*2.08),1) if l_ is not None else None,"raw_pts":round(raw_,1),
+            "hv":round(sg_(a_)-raw_,1) if a_ is not None else None,
             "games":int(r.games),"wr":round(float(r.wr),3),"gd15":int(r.gd15) if r.gd15==r.gd15 else 0})
-    champs.sort(key=lambda c:-c["dv"])
+    champs.sort(key=lambda c:-(c["adj"] if c["adj"] is not None else c["dv"]))
     json.dump(champs,open(OUT/"champions.json","w",encoding="utf-8"),ensure_ascii=False)
     seen=sorted(set(pd.unique(dt[PICK].astype(str).values.ravel())))
     pool=[{"champion":c,"ts":round(CR[c].mu-3*CR[c].sigma,1)} for c in seen if c and c!="nan"]

@@ -171,10 +171,10 @@ function worldsView(){
   return wrap;
 }
 function champTable(rows,predN){
-  const dvmap={};state.champions.forEach(c=>dvmap[c.champion+'|'+c.role]=c.dv);
+  const dvmap={};state.champions.forEach(c=>dvmap[c.champion+'|'+c.role]=c.adj!=null?c.adj:c.dv);
   return tableEl([['#','rk'],[t('Champion','Champion')],[t('Rôle','Role')],[t('Présence','Presence'),'num'],['Picks','num'],['Bans','num'],['Win%','num'],
-    [t('Prévu prochains matchs','Forecast next matches'),'num'],[t('Valeur draft','Draft value'),'num']],
-    rows.map((r,i)=>{const tr=el('tr'),dv=r.dv!=null?r.dv:dvmap[r.champion+'|'+r.role];
+    [t('Prévu prochains matchs','Forecast next matches'),'num'],[t('Valeur draft ajustée','Adjusted draft value'),'num']],
+    rows.map((r,i)=>{const tr=el('tr'),dv=dvmap[r.champion+'|'+r.role]!=null?dvmap[r.champion+'|'+r.role]:r.dv;
       tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(r.champion)}</td><td>${r.role?`<span class="tag">${r.role.toUpperCase()}</span>`:''}</td>
         <td class="num"><b>${pct(r.pres)}</b></td><td class="num">${r.picks}</td><td class="num">${r.bans}</td>
         <td class="num ${r.wr!=null?(r.wr>=.5?'ok':'no'):''}">${r.wr!=null&&r.picks>=3?pct(r.wr):'–'}</td>
@@ -227,16 +227,34 @@ function players(){
 function champs(){
   const wrap=el('div');
   const W=state.worlds;
-  const srcs=[['worlds','Worlds 2026'],['recent',t('60 derniers jours','Last 60 days')],['rating',t('Notes par rôle','Role ratings')]];
+  const srcs=[['worlds','Worlds 2026'],['recent',t('60 derniers jours','Last 60 days')],['hidden',t('💎 Valeur cachée','💎 Hidden value')],['rating',t('Notes par rôle','Role ratings')]];
   const bar=filterBar(srcs,state.cSrc,k=>{state.cSrc=k;render()});
+  if(state.cSrc==='hidden'){
+    const roles=[['ALL',t('Tous','All')],...ROLES.map(r=>[r,RN[r]])];
+    const b2=filterBar([...srcs.map(x=>x),],state.cSrc,k=>{state.cSrc=k;render()});
+    const b3=el('div');b3.style.cssText='display:flex;gap:10px;flex-wrap:wrap';b3.append(b2,filterBar(roles,state.cRole,k=>{state.cRole=k;render()}));
+    const p=panel(t('Valeur cachée — effet réel du champion vs ce que montre le winrate','Hidden value — a champion\'s real effect vs what the winrate shows'),b3);
+    const pres={};((W&&W.meta_recent&&W.meta_recent.rows)||[]).forEach(r=>pres[r.champion]=r.pres);
+    const list=state.champions.filter(x=>x.adj!=null&&x.games>=25&&(state.cRole==='ALL'||x.role===state.cRole)).slice().sort((a,b)=>b.hv-a.hv);
+    p.append(tableEl([['#','rk'],['Champion'],[t('Rôle','Role')],[t('Effet ajusté (pts)','Adjusted effect (pts)'),'num'],[t('Winrate brut (pts)','Raw winrate (pts)'),'num'],[t('Écart caché (pts)','Hidden gap (pts)'),'num'],
+      [t('Gain après 15 games (pts)','Gain after 15 games (pts)'),'num'],[t('Présence 60 j','Presence 60 d'),'num'],['Games','num'],[t('Verdict','Verdict')]],
+      list.map((x,i)=>{const tr=el('tr'),pr=pres[x.champion];
+        const v=x.hv>=2&&(pr==null||pr<.25)?`<span class="pill" style="color:var(--fav);border-color:var(--fav)">💎 ${t('sous-estimé','undervalued')}</span>`:x.hv<=-2&&pr!=null&&pr>=.25?`<span class="pill" style="color:var(--warn);border-color:var(--warn)">${t('surcoté','overrated')}</span>`:'–';
+        tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(x.champion)}</td><td><span class="tag">${x.role.toUpperCase()}</span></td>
+          <td class="num"><b>${x.adj_pts>=0?'+':''}${x.adj_pts.toFixed(1)}</b></td><td class="num muted">${x.raw_pts>=0?'+':''}${x.raw_pts.toFixed(1)}</td>
+          <td class="num ${x.hv>=0?'ok':'no'}"><b>${x.hv>=0?'+':''}${x.hv.toFixed(1)}</b></td><td class="num">${x.learn15!=null?(x.learn15>=0?'+':'')+x.learn15.toFixed(1):'–'}</td>
+          <td class="num muted">${pr!=null?pct(pr):'–'}</td><td class="num">${x.games}</td><td>${v}</td>`;return tr})));
+    p.append(el('div','note',t('Effet ajusté = effet net du champion (en points de win%, à la maîtrise typique du champion) estimé par régression ridge de type RAPM : on contrôle simultanément la force d\'équipe, le niveau des 10 joueurs et la maîtrise du champion par son joueur (nombre de games déjà jouées). Écart caché = effet ajusté − winrate brut shrinké : positif = le winrate sous-estime le champion (souvent un champion difficile à maîtriser ou joué par des équipes plus faibles). « Gain après 15 games » = courbe d\'apprentissage. Échantillons modestes : à lire comme des pistes (ridge, ≥ 25 games, tier-1 depuis 2025). Testé en walk-forward : estimation de la valeur de draft meilleure que l\'ancien modèle (log-loss 0,6276 vs 0,6306 à force d\'équipe égale).','Adjusted effect = the champion\'s net effect (in win% points, at the typical mastery of the champion) from a RAPM-style ridge regression controlling for team strength, the level of all 10 players and the champion\'s mastery by its player (games already played). Hidden gap = adjusted effect − shrunk raw winrate: positive = the winrate understates the champion (often hard to master or played by weaker teams). “Gain after 15 games” = learning curve. Modest samples: read as leads (ridge, ≥ 25 games, tier-1 since 2025). Walk-forward tested: better draft-value estimate than the old model (log-loss 0.6276 vs 0.6306 at equal team strength).')));
+    wrap.append(p);return wrap;
+  }
   if(state.cSrc==='rating'){
     const roles=[['ALL',t('Tous','All')],...ROLES.map(r=>[r,RN[r]])];
     const b2=filterBar(roles,state.cRole,k=>{state.cRole=k;render()});
     const p=panel(t('Valeur de draft ajustée par rôle (modèle v2) + TrueSkill','Adjusted draft value by role (model v2) + TrueSkill'),b2);
     const list=state.champions.filter(x=>state.cRole==='ALL'||x.role===state.cRole).slice(0,60);
-    p.append(tableEl([['#','rk'],['Champion'],[t('Rôle','Role')],[t('Valeur draft','Draft value'),'num'],['TrueSkill','num'],['Win%','num'],['Games','num'],['GD@15','num']],
-      list.map((x,i)=>{const tr=el('tr');tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(x.champion)}</td><td><span class="tag">${x.role.toUpperCase()}</span></td>
-        <td class="rtg num">${x.dv>=0?'+':''}${x.dv.toFixed(2)}</td><td class="num">${x.ts.toFixed(1)}</td><td class="num">${pct(x.wr)}</td><td class="num">${x.games}</td><td class="num">${x.gd15>0?'+':''}${x.gd15}</td>`;return tr})));
+    p.append(tableEl([['#','rk'],['Champion'],[t('Rôle','Role')],[t('Valeur ajustée (RAPM)','Adjusted value (RAPM)'),'num'],['TrueSkill','num'],['Win%','num'],['Games','num'],['GD@15','num']],
+      list.map((x,i)=>{const tr=el('tr'),vv=x.adj!=null?x.adj:x.dv;tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(x.champion)}</td><td><span class="tag">${x.role.toUpperCase()}</span></td>
+        <td class="rtg num">${vv>=0?'+':''}${vv.toFixed(2)}</td><td class="num">${x.ts.toFixed(1)}</td><td class="num">${pct(x.wr)}</td><td class="num">${x.games}</td><td class="num">${x.gd15>0?'+':''}${x.gd15}</td>`;return tr})));
     p.append(el('div','note',t('Valeur de draft = effet du champion dans ce rôle sur la probabilité de victoire (logit), à force d\'équipe égale, estimé avec décroissance temporelle (la meta change vite).','Draft value = the champion\'s effect in that role on win probability (logit), holding team strength equal, estimated with time decay (the meta moves fast).')));
     wrap.append(p);return wrap;
   }

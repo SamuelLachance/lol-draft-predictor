@@ -33,6 +33,14 @@ Probabilités bien calibrées à tous les niveaux de confiance (60 % annoncé �
 ### Pourquoi pas 75-80 % ?
 Un match pro est très bruité : avec uniquement l'information d'avant-match, ~65 % est proche du plafond. Je l'ai testé : un LightGBM sur ~60 variables causales (meta glissante par champion×rôle, attributs de composition — engage, CC, mobilité, poke, scaling, frontline, AD/AP —, repos/charge, série, TrueSkill par rôle, Elo séquentiel…) fait **moins bien** que le stack linéaire ci-dessus (0.636 vs 0.628) ; ces variables n'apportent rien une fois la force d'équipe connue (`ml/eval_v4.py`, `ml/exp_stack.py`). La draft seule vaut ~54 %. Les probabilités qui dépassent nettement 70 % ne viennent donc que d'écarts de niveau réels entre équipes. La sélection des variables s'est faite sur la même période de test : prévoir ~0.1-0.2 pt de moins en conditions réelles.
 
+## Approches « valeur cachée » testées (RAPM, embeddings, …)
+
+Test hors échantillon (walk-forward, 7 329 matchs majeurs 2024-2026, refit trimestriel ; `ml/exp_rapm.py`, `ml/eval_rapm.py`) de méthodes inspirées du basket (RAPM) et des GNN :
+- **RAPM / modèle hiérarchique** (`ml/rapm.py`) : ridge logistique `y ~ force d'équipe + niveau des 10 joueurs + champion×rôle + champion×maîtrise` (maîtrise = games déjà jouées par ce joueur sur ce champion) → effet *net* du champion. Seul, il estime mieux la valeur de draft que notre ancien modèle (log-loss à force d'équipe égale **0,6276 vs 0,6306**, précision 64,6 % vs 63,7 %). Ajouté au stack complet : gain réel mais minime (−0,0010 [−0,0019 ; −0,0001]), car la maîtrise et le niveau des joueurs y sont déjà captés → **non intégré au stack** (complexité > gain), mais **utilisé pour l'onglet Meta → « 💎 Valeur cachée »** : effet ajusté vs winrate brut, courbe d'apprentissage (gain après 15 games), présence. Exemple : Nautilus support 43,8 % de winrate brut sur 981 games, mais effet ajusté ≈ neutre/positif — le winrate sous-estime le champion.
+- **Embeddings de champions + synergies/matchups latents** (réseau torch, équivalent léger d'un GNN sur le graphe de composition) : **aucun gain** (coefficient ~0, surajustement).
+- **Niveau joueur du RAPM** : n'apporte rien au-delà du Bradley-Terry par joueur déjà présent.
+- **Non testables ici** : chaînes de Markov / analyse de survie sur les objectifs (pas de données en cours de partie), RL et CFR/équilibre de Nash (pas de simulateur du jeu).
+
 ## Études spécifiques aux Worlds (résultats négatifs, documentés)
 
 Toutes reproductibles (`ml/fetch_history.py` puis `ml/study_scaling.py`, `ml/study_worlds.py`, `ml/study_worlds2.py`, `ml/study_intl.py`) sur 42 000 games pro 2014-2026 avec durée et compositions.

@@ -7,7 +7,7 @@ for f in [root / "index.html", root / "match/index.html", root / "draft/index.ht
     parts = [src] if f.suffix == ".js" else re.findall(r"<script>(.*?)</script>", src, re.S)
     for i, js in enumerate(parts):
         tmp = pathlib.Path(tempfile.gettempdir()) / f"chk_{f.stem}_{i}.js"; tmp.write_text(js, encoding="utf-8")
-        r = subprocess.run(["node", "--check", str(tmp)], capture_output=True, text=True)
+        r = subprocess.run(["node", "--check", str(tmp)], capture_output=True, text=True, encoding='utf-8', errors='replace')
         if r.returncode:
-            bad += 1; print("SYNTAX ERROR", f, "\n", r.stderr[:600])
+            bad += 1; print("SYNTAX ERROR", f, "\n", (r.stderr or '')[:600])
 print("OK" if not bad else f"{bad} erreur(s)"); sys.exit(1 if bad else 0)

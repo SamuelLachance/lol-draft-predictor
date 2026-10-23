@@ -21,6 +21,7 @@ import draftmodel as dm
 BT = dict(halflife=180, lam=2.0, sg=2.0)         # grille walk-forward (ml/eval_strength.py)
 PBT = dict(halflife=365, lam=8.0)                # grille walk-forward (ml/exp_pbt.py)
 HL_D, LAM_D, WIN_D = 240, 6.0, 900               # draft : demi-vie, ridge, fenetre (jours)
+BT_FROM = "2021-01-01"                           # bt walk-forward pour toutes les games depuis cette date
 START = "2023-01-01"                              # debut des refits walk-forward (bt, pbt, draft)
 STACK_FROM = "2023-06-01"; HL_STACK = 900.0
 EVAL_FROM = pd.Period("2025-09", "M")             # mois de test du stack (walk-forward)
@@ -55,14 +56,18 @@ def walk_forward(G: pd.DataFrame, home: dict) -> pd.DataFrame:
     G = G.sort_values("date").reset_index(drop=True)
     tier = tier_mask(G, home).to_numpy()
     bt = np.full(len(G), np.nan); pb = np.full(len(G), np.nan); dl = np.full(len(G), np.nan)
-    for m in pd.period_range(START, G.date.max(), freq="M"):
+    for m in pd.period_range(BT_FROM, G.date.max(), freq="M"):
         a, b = m.start_time, (m + 1).start_time
-        te = np.where((G.date >= a) & (G.date < b) & tier)[0]
+        ta = np.where((G.date >= a) & (G.date < b))[0]
+        if not len(ta):
+            continue
+        suba = G.iloc[ta]
+        rating, side, _ = st.fit_bt(G, a, home, **BT)
+        bt[ta] = np.array([rating(x) - rating(z) for x, z in zip(suba.blue, suba.red)]) + side     # toutes les games (controle du RAPM)
+        te = np.where((G.date >= a) & (G.date < b) & tier & (G.date >= START))[0]
         if not len(te):
             continue
         sub = G.iloc[te]
-        rating, side, _ = st.fit_bt(G, a, home, **BT)
-        bt[te] = np.array([rating(x) - rating(z) for x, z in zip(sub.blue, sub.red)]) + side
         pr, td, off, pside = st.fit_pbt(G, a, home, **PBT)
         pb[te] = np.array([st.pbt_diff(b_, r_, bp, rp, pr, td, off, home) for b_, r_, bp, rp in zip(sub.blue, sub.red, sub.bp, sub.rp)]) + pside
         dl[te] = dm.logit(fit_draft(G, a), *dm.to_lists(sub))
