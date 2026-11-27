@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="fr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LoL Esports Predictor — Worlds 2026</title>
+<meta name="description" content="Prédictions, ratings et analyse de draft pour les Worlds 2026 de League of Legends — page dédiée par match, mise à jour en direct.">
+<link rel="stylesheet" href="common.css">
+</head>
+<body data-base="">
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand"><div class="logo">LP</div><div style="min-width:0"><h1>LoL Esports Predictor</h1><div class="sub" id="sub">…</div></div></div>
+    <span id="hbtn" style="display:flex;gap:8px"></span>
+  </div>
+  <nav class="tabs" id="tabs"></nav>
+</header>
+<main class="wrap"><div id="view"></div><footer id="foot"></footer></main>
+
+<script src="common.js"></script>
+<script src="sim.js"></script>
+<script src="cards.js"></script>
+<script>
+const {$,el,esc,pct,t,tx}=LP;
+const ROLES=['top','jng','mid','bot','sup'];
+const RN={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Support'};
+const state={liveSim:null,liveKey:'',teams:[],players:[],champions:[],matches:[],meta:{},regions:[],pool:[],worlds:null,dv:null,es:[],esAt:0,
+  view:'worlds',tLeague:'ALL',pRole:'mid',cRole:'ALL',cSrc:'worlds',wFilter:'up'};
+const ea=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+const TABS=()=>[['worlds','Worlds 2026'],['picks',t('Résultats vs modèle','Results vs model')],['teams',t('Équipes','Teams')],
+  ['players',t('Joueurs','Players')],['champions','Meta / Champions'],['predict',t('Simuler un match','Predict a match')]];
+
+async function boot(){
+  const get=f=>LP.json(f).catch(()=>f==='meta'?{}:[]);
+  [state.teams,state.players,state.champions,state.matches,state.meta,state.regions,state.pool]=await Promise.all(
+    ['teams','players','champions','matches','meta','regions','champ_pool'].map(get));
+  state.worlds=await LP.json('worlds',true).catch(()=>null);
+  fetch('model/draft_v2.json').then(r=>r.json()).then(d=>state.dv=d).catch(()=>{});
+  buildIndexes();
+  shell(); cards(); render();
+  LPC.init({teams:state.teams,players:state.players,regions:state.regions,worlds:state.worlds});
+  document.addEventListener('lp:lang',()=>{shell();cards();render()});
+  if(location.hash.startsWith('#tab=')){const v=location.hash.slice(5);if(TABS().some(x=>x[0]===v)){state.view=v;shell();render()}}
+  poll(); setInterval(poll,30000); setInterval(tickStatus,15000); setInterval(tickCd,1000);
+}
+function shell(){
+  $('#hbtn').innerHTML='';$('#hbtn').append(LP.langBtn(),LP.themeBtn());
+  const tabs=$('#tabs');tabs.innerHTML='';
+  TABS().forEach(([k,l])=>{const b=el('button','tab'+(k===state.view?' on':''),l);b.dataset.v=k;
+    b.onclick=()=>{state.view=k;history.replaceState(null,'','#tab='+k);[...tabs.children].forEach(x=>x.classList.toggle('on',x===b));render()};tabs.append(b)});
+  $('#foot').innerHTML=t(
+    `Modèle : force d'équipe inter-ligues (Bradley-Terry à décalage de ligue) + TrueSkill des rosters + valeur de draft, validé en <i>walk-forward</i> (refit mensuel, aucune fuite). La draft seule explique très peu un match pro ; elle ajuste la proba, elle ne la détermine pas. Données : Leaguepedia, Oracle's Elixir, API lolesports. Analyse esport, pas un conseil de pari.`,
+    `Model: inter-league team strength (league-offset Bradley-Terry) + roster TrueSkill + draft value, validated <i>walk-forward</i> (monthly refits, no leakage). Draft alone explains very little of a pro game; it nudges the probability, it doesn't set it. Data: Leaguepedia, Oracle's Elixir, lolesports API. Esports analysis, not betting advice.`);
+}
+function buildIndexes(){
+  state.tidx=Object.fromEntries(state.teams.map(x=>[x.team,x]));
+  state.pidx={};state.players.forEach(p=>state.pidx[p.player+'|'+p.role]=p);
+  state.regidx=Object.fromEntries((state.regions||[]).map(r=>[r.region,r]));
+  state.roleStats={};
+  ROLES.forEach(ro=>{
+    const ps=state.players.filter(p=>p.role===ro),col=f=>ps.map(f).filter(v=>v!=null).sort((a,b)=>a-b);
+    state.roleStats[ro]={gd15:col(p=>p.gd15),kp:col(p=>p.kp),kda:col(p=>p.kda),dmg:col(p=>p.dmg||0)};
+  });
+}
+function cards(){ $('#sub').innerHTML=`<span class="livedot off" id="dot"></span><span id="stat"></span>`;tickStatus() }
+function kpiStrip(){
+  const m=state.meta,mm=(m.metrics||{})['pre-draft']||{},po=(m.metrics||{})['post-draft']||{},old=(m.metrics||{}).elo_seq_ancien||{};
+  const w=el('div','strip');
+  [[t('Précision (avant draft)','Accuracy (pre-draft)'),pct(mm.acc,1),`${t('après draft','post-draft')} ${pct(po.acc,1)} · ${t('ancien modèle','old model')} ${pct(old.acc,1)}`],
+   ['Log-loss',mm.logloss||'–',`${t('ancien','old')} ${old.logloss||'–'}`],
+   [t('Données jusqu\'au','Data through'),m.data_through||m.updated||'–',m.n_games?`${m.n_games.toLocaleString()} games`:''],
+   [t('Équipes · joueurs','Teams · players'),`${m.n_teams||'–'} · ${m.n_players||'–'}`,t('ligues majeures actives','active major leagues')]].forEach(([k,v,sm])=>{
+    const d=el('div','kpi');d.innerHTML=`<div class="k">${k}</div><div class="v">${v} <small>${sm}</small></div>`;w.append(d)});
+  return w;
+}
+function tickStatus(){
+  const s=$('#stat');if(!s)return;const w=state.worlds,live=(state.es||[]).filter(e=>e.state==='inProgress').length;
+  const dot=$('#dot');if(dot){dot.className='livedot'+(live?' hot':(state.esAt&&Date.now()-state.esAt<120000?'':' off'))}
+  s.textContent=(live?`🔴 ${live} ${t('match en direct','live match(es)')} · `:'')+
+    t('Modèle recalculé','Model rebuilt')+' '+(w?LP.ago(Date.parse(w.generated)):'–')+' · '+t('flux live','live feed')+' '+(state.esAt?LP.ago(state.esAt):'–');
+}
+async function recompute(){
+  if(!state.worlds||!window.SIM)return;
+  const key=(state.es||[]).filter(e=>e.state==='completed').map(e=>e.match.id).join(',')+'|'+state.worlds.generated;
+  if(key===state.liveKey)return; state.liveKey=key;
+  let shown=false;
+  // 100 000 simulations dans un Web Worker : premiers resultats apres ~10 000, affinage jusqu'a 100 000 (sans figer la page)
+  SIM.liveAsync(state.worlds,state.es,{findEvent:LP.findEvent,utc:LP.utc,sameTeam:LP.sameTeam},{workerUrl:'simworker.js',n:SIM.N_DEFAULT,
+    onUpdate:(r,done)=>{state.liveSim=r;if(state.view==='worlds'&&$('#modal')?.style.display!=='flex'&&(done||!shown)){shown=true;render()}}});
+}
+async function poll(){
+  try{state.es=await LP.esSchedule();state.esAt=Date.now()}catch(e){}
+  try{const l=await LP.json('live',true);
+    if(!state.worlds||l.version!==state.worlds.generated){state.worlds=await LP.json('worlds',true);LPC.update({worlds:state.worlds})}}catch(e){}
+  await recompute();
+  tickStatus();if(state.view==='worlds'&&$('#modal')?.style.display!=='flex')render();
+}
+const panel=(title,extra)=>{const p=el('div','panel');const h=el('div','phead');h.append(el('h3',null,title));if(extra)h.append(extra);p.append(h);return p};
+const filterBar=(opts,cur,on)=>{const w=el('div');w.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+  opts.forEach(([k,l])=>{const b=el('button','filt'+(k===cur?' on':''),l);b.onclick=()=>on(k);w.append(b)});return w};
+function render(){
+  const v=$('#view');v.innerHTML='';
+  const f={worlds:worldsView,picks,teams,players,champions:champs,predict}[state.view];
+  v.append(f());LP.hydrate(v);
+}
+function tableEl(head,rows){const s=el('div','scroll'),tb=el('table');
+  tb.innerHTML='<thead><tr>'+head.map(h=>`<th class="${h[1]||''}">${h[0]}</th>`).join('')+'</tr></thead>';
+  const b=el('tbody');rows.forEach(r=>b.append(r));tb.append(b);s.append(tb);return s}
+
+// ============ WORLDS ============
+function evFor(m){const ev=LP.findEvent(m,state.es||[]);if(!ev)return null;
+  const tt=ev.match.teams;
+  const flip=!!m.t1&&LP.sameTeam(tt[1].name,m.t1)&&!LP.sameTeam(tt[0].name,m.t1);
+  const w=ev.match.teams.map(x=>x.result?x.result.gameWins:null);
+  return {state:ev.state,s1:flip?w[1]:w[0],s2:flip?w[0]:w[1],id:ev.match.id,ev}}
+function matchCard(m){
+  const o=evFor(m),st=o?o.state:(m.status==='completed'?'completed':'unstarted');
+  const started=st!=='unstarted';
+  const s1=started?(o&&o.s1!=null?o.s1:m.s1):null,s2=started?(o&&o.s2!=null?o.s2:m.s2):null;
+  const done=st==='completed',live=st==='inProgress';
+  const a=el('a','mc'+(live?' live':''));a.href='match/#'+(m.slug||'');
+  const ts=LP.utc(m.date);
+  const chip=live?`<span class="chip live">● LIVE</span>`:done?`<span class="chip done">${t('Terminé','Final')}</span>`:`<span class="chip up">${LP.fmtTime(ts)}</span>`;
+  const known=m.t1&&m.t2;
+  const w1=done&&Number(s1)>Number(s2),w2=done&&Number(s2)>Number(s1);
+  const LS=state.liveSim,lp=LS&&LS.pred[m.slug],lst=LS&&LS.stakes[m.slug];
+  const p=lp?lp.series:(m.pred?m.pred.series:null);
+  const stk=lst||m.stakes;
+  a.innerHTML=`<div class="top"><span>${esc(m.stage==='Play-In'?'Play-In':'Swiss')} · ${esc(m.round||'')}</span><span>Bo${m.bo}</span><span style="margin-left:auto">${chip}</span></div>
+    <div class="tr ${w2?'lose':''}"><span>${known?LPC.team(m.t1,{b:false}):t('À déterminer','TBD')}</span><span class="sc">${s1==null?'':s1}</span></div>
+    <div class="tr ${w1?'lose':''}"><span>${known?LPC.team(m.t2,{b:false}):t('À déterminer','TBD')}</span><span class="sc">${s2==null?'':s2}</span></div>
+    ${p!=null?`<div class="pb"><span style="width:${p*100}%"></span></div><div class="ft"><span>${pct(p)}</span><span>${t('victoire (série)','series win')}</span><span>${pct(1-p)}</span></div>`:''}
+    ${stk?`<div class="ft"><span>${t('Qualif.','Qualif.')} ${pct(stk.qual_now.a)}</span><span>${stk.records.a} · ${stk.records.b}</span><span>${pct(stk.qual_now.b)}</span></div>`:''}`;
+  return a;
+}
+const stOf=m=>{const o=evFor(m);return o?o.state:(m.status==='completed'?'completed':'unstarted')};
+function tickCd(){const c=$('#spotcd');if(!c)return;const d=+c.dataset.ts-Date.now();
+  if(!(+c.dataset.ts)||d<=-1e9){c.textContent='';return}
+  if(d<=0){c.textContent=t('Début imminent','Starting soon');return}
+  const h=Math.floor(d/3.6e6),mi=Math.floor(d%3.6e6/6e4),s=Math.floor(d%6e4/1e3);
+  c.textContent=(h?h+'h ':'')+String(mi).padStart(2,'0')+'m '+String(s).padStart(2,'0')+'s'}
+function spotMatch(W){
+  const known=W.matches.filter(m=>m.t1&&m.t2);
+  const live=known.find(m=>stOf(m)==='inProgress');if(live)return{m:live,kind:'live'};
+  const up=known.filter(m=>stOf(m)==='unstarted').sort((a,b)=>LP.utc(a.date)-LP.utc(b.date))[0];if(up)return{m:up,kind:'next'};
+  const done=known.filter(m=>stOf(m)==='completed').pop();return done?{m:done,kind:'last'}:null;
+}
+function spotlight(W){
+  const sm=spotMatch(W);if(!sm)return null;const{m,kind}=sm,o=evFor(m),LS=state.liveSim,lp=LS&&LS.pred[m.slug],stk=(LS&&LS.stakes[m.slug])||m.stakes;
+  const p=lp?lp.series:(m.pred?m.pred.series:null),A=state.tidx[m.t1],B=state.tidx[m.t2],started=kind!=='next';
+  const s1=started?(o&&o.s1!=null?o.s1:m.s1):null,s2=started?(o&&o.s2!=null?o.s2:m.s2):null,ts=LP.utc(m.date);
+  const lab=kind==='live'?`<span class="chip live">● LIVE</span>`:kind==='next'?`<span class="chip up">${t('Prochain match','Next match')}</span>`:`<span class="chip done">${t('Dernier résultat','Latest result')}</span>`;
+  const sub=T=>T?`<small>Power ${T.power} · ${T.region} · L10 ${T.form}</small>`:'';
+  const sp=el('div','spot'+(kind==='live'?' live':''));
+  const fact=(k,a_,b_)=>`<div class="fact"><div class="k">${k}</div><div class="v"><span class="bluet">${a_}</span><span class="redt">${b_}</span></div></div>`;
+  sp.innerHTML=`<div class="top">${lab}<b>${esc(m.stage==='Play-In'?'Play-In':'Swiss')} · ${esc(m.round||'')}</b><span>Bo${m.bo}</span><span>${LP.fmtDay(ts)} · ${LP.fmtTime(ts)}</span><span class="cd" id="spotcd" data-ts="${kind==='next'?ts:0}"></span></div>
+    <div class="teams"><div class="tm">${LPC.team(m.t1,{b:false})}${sub(A)}</div><div class="vs">${started?`${s1==null?0:s1} – ${s2==null?0:s2}`:'VS'}</div><div class="tm r">${LPC.team(m.t2,{b:false})}${sub(B)}</div></div>
+    ${p!=null?`<div><div class="pnum"><span>${pct(p,1)}</span><span class="muted" style="font-size:.78rem;font-weight:600;align-self:center">${t('victoire de la série (avant draft)','series win (pre-draft)')}</span><span>${pct(1-p,1)}</span></div><div class="pbar"><span style="width:${p*100}%"></span></div></div>`:''}
+    <div class="facts">${stk?fact(t('Qualification top 8','Top-8 odds'),pct(stk.qual_now.a),pct(stk.qual_now.b))+fact(t('Bilan Swiss','Swiss record'),stk.records.a,stk.records.b)
+      +(stk.if?fact(t('Si victoire → qualif.','If win → top-8'),pct(stk.if.a_win.a),pct(stk.if.b_win.b)):''):''}
+      ${A&&B?fact(t('Force (power)','Strength (power)'),A.power,B.power):''}${m.pred&&m.pred.h2h&&m.pred.h2h.games?fact('H2H',m.pred.h2h.a_wins,m.pred.h2h.games-m.pred.h2h.a_wins):''}</div>
+    <a class="cta" href="match/#${esc(m.slug||'')}">${t('Page du match','Match page')} →</a>`;
+  return sp;
+}
+function oddsPanel(W){
+  const ST=(state.liveSim?state.liveSim.standings:W.standings).slice().sort((a,b)=>(b.title||0)-(a.title||0)).slice(0,8),mx=Math.max(...ST.map(s=>s.title||0),.01);
+  const p=panel(t('Favoris du titre','Title favourites'));p.classList.add('hl','odds');
+  const b=el('div','pbody');
+  b.innerHTML=ST.map(s=>`<div class="orow"><span class="nm">${LPC.team(s.team,{b:false})}</span><div class="bar"><span style="width:${(s.title||0)/mx*100}%"></span></div><span class="pc">${pct(s.title)}</span><span class="pc2">${s.w>=3?'✔ top 8':s.l>=3?'✘':'top 8 '+pct(s.qual)}</span></div>`).join('');
+  p.append(b);p.append(el('div','note',(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> · `:'')+`${(state.liveSim?state.liveSim.n:W.sim.n).toLocaleString()}${state.liveSim&&state.liveSim.n<state.liveSim.target?' / '+state.liveSim.target.toLocaleString():''} ${t('simulations — règles officielles du Swiss','simulations — official Swiss rules')}`));
+  return p;
+}
+function worldsView(){
+  const W=state.worlds,wrap=el('div');
+  if(!W){wrap.append(el('div','err',t('Données Worlds indisponibles pour le moment.','Worlds data unavailable right now.')));return wrap}
+  const all=W.matches;
+  const nLive=all.filter(m=>stOf(m)==='inProgress').length;
+  wrap.append(Object.assign(el('div','sectitle'),{innerHTML:`Worlds 2026 <small>${t('Swiss Stage · Allen (Texas) · du 23 au 31 octobre, puis quarts, demies et finale','Swiss Stage · Allen (Texas) · Oct 23–31, then quarterfinals, semifinals and final')}${nLive?` · <b class="no">● ${nLive} ${t('en direct','live')}</b>`:''}</small>`}));
+  const hh=el('div','heroH'),sp=spotlight(W);if(sp)hh.append(sp);hh.append(oddsPanel(W));wrap.append(hh);
+  wrap.append(kpiStrip());
+  // --- matchs
+  const bar=filterBar([['up',t('À venir / en direct','Upcoming / live')],['done',t('Terminés','Completed')],['all',t('Tous','All')]],state.wFilter,k=>{state.wFilter=k;render()});
+  const p=panel(t('Tous les matchs — cliquez pour la page dédiée','All matches — click for the dedicated page'),bar);
+  let list=all.filter(m=>state.wFilter==='all'||(state.wFilter==='done'?stOf(m)==='completed':stOf(m)!=='completed'));
+  if(state.wFilter==='done')list=list.slice().reverse();
+  let hidden=0;if(state.wFilter==='up'){const k=list.filter(m=>m.t1&&m.t2||stOf(m)!=='unstarted');hidden=list.length-k.length;list=k}
+  list=list.slice(0,state.wFilter==='all'?60:36);
+  let cur='',g=null;
+  list.forEach(m=>{const d=LP.fmtDay(LP.utc(m.date));
+    if(d!==cur){cur=d;p.append(el('div','day',d));g=el('div','mgrid');p.append(g)}
+    g.append(matchCard(m))});
+  if(!list.length)p.append(el('div','note',t('Aucun match dans cette vue.','No match in this view.')));
+  if(hidden)p.append(el('div','note',t(`${hidden} matchs suivants (équipes à déterminer) apparaîtront automatiquement dès que les affiches seront connues — voir « Tous ».`,`${hidden} later matches (teams TBD) will appear automatically once the pairings are set — see “All”.`)));
+  wrap.append(p);
+  // --- classement Swiss
+  const sp2=panel(t('Swiss Stage — classement et chances de qualification','Swiss Stage — standings & qualification odds'));
+  const ST=state.liveSim?state.liveSim.standings:W.standings;
+  const rows=ST.map((s,i)=>{const tr=el('tr'),q=s.w>=3,out=s.l>=3;
+    const top=Object.entries(s.rec||{}).slice(0,2).map(([k,v])=>`${k} ${pct(v)}`).join(' · ');
+    tr.innerHTML=`<td class="rk">${i+1}</td><td><b class="lnk" data-team="${ea(s.team)}">${esc(s.team)}</b><span class="tag">${esc(s.region||'')}</span></td>
+      <td class="num"><b>${s.w}-${s.l}</b></td>
+      <td data-sort="${q?1.01:out?-1:(s.qual||0)}"><div class="qbar"><div class="bar"><span style="width:${(s.qual||0)*100}%;background:${q?'var(--fav)':out?'var(--bad)':'var(--accent)'}"></span></div><b>${q?'✔':out?'✘':pct(s.qual)}</b></div></td>
+      <td class="num">${pct(s.title,1)}</td><td class="muted" style="font-size:.72rem">${top}</td>`;return tr});
+  sp2.append(tableEl([['#','rk'],[t('Équipe','Team')],[t('Bilan','Record'),'num'],[t('Qualif. top 8','Top-8')],[t('Titre','Title'),'num'],[t('Bilans probables','Likely records')]],rows));
+  sp2.append(Object.assign(el('div','note'),{innerHTML:(state.liveSim?`<b style="color:var(--accent)">● ${t('Recalculé en direct','Recomputed live')}</b> ${t('avec les résultats officiels','with the official results')} (${state.liveSim.extra} ${t('match(s) pas encore intégré(s) par le serveur','match(es) not yet folded in by the server')}) · ${(state.liveSim.n.toLocaleString()+(state.liveSim.n<state.liveSim.target?' / '+state.liveSim.target.toLocaleString():''))} ${t('simulations dans votre navigateur','simulations in your browser')}. `:`${t('Mis à jour par le serveur','Server-updated')} (${W.generated.slice(11,16)} UTC) · ${W.sim.n.toLocaleString()} ${t('simulations','simulations')}. `)+tx(W.sim.note)+' · '+t('ratings du','ratings as of')+' '+W.data_through+'.'}));
+  wrap.append(sp2);
+  // --- meta du tournoi
+  const M=W.meta_worlds.n>=6?W.meta_worlds:W.meta_recent;
+  const mp=panel(t('Champions les plus contestés','Most contested champions')+' — '+M.since+` (${M.n} games)`);
+  mp.append(champTable(M.rows.slice(0,12)));wrap.append(mp);
+  return wrap;
+}
+function champTable(rows,predN){
+  const dvmap={};state.champions.forEach(c=>dvmap[c.champion+'|'+c.role]=c.adj!=null?c.adj:c.dv);
+  return tableEl([['#','rk'],[t('Champion','Champion')],[t('Rôle','Role')],[t('Présence','Presence'),'num'],['Picks','num'],['Bans','num'],['Win%','num'],
+    [t('Prévu prochains matchs','Forecast next matches'),'num'],[t('Valeur draft ajustée','Adjusted draft value'),'num']],
+    rows.map((r,i)=>{const tr=el('tr'),dv=dvmap[r.champion+'|'+r.role]!=null?dvmap[r.champion+'|'+r.role]:r.dv;
+      tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(r.champion)}</td><td>${r.role?`<span class="tag">${r.role.toUpperCase()}</span>`:''}</td>
+        <td class="num"><b>${pct(r.pres)}</b></td><td class="num">${r.picks}</td><td class="num">${r.bans}</td>
+        <td class="num ${r.wr!=null?(r.wr>=.5?'ok':'no'):''}">${r.wr!=null&&r.picks>=3?pct(r.wr):'–'}</td>
+        <td class="num">${r.pred!=null?'<b>'+pct(r.pred)+'</b>':'–'}</td>
+        <td class="num muted">${dv!=null?(dv>=0?'+':'')+dv.toFixed(2):'–'}</td>`;return tr}));
+}
+
+// ============ onglets existants ============
+function picks(){
+  const p=panel(t('Résultats récents vs prédictions du modèle (avant draft, hors-échantillon)','Recent results vs model (pre-draft, out-of-sample)'));
+  const rows=state.matches.slice(0,120).map(m=>{
+    const tr=el('tr'),ok=(m.pred>=.5)===(m.blue_win===1);
+    const fav=m.pred>=.5?m.blue:m.red, fp=m.pred>=.5?m.pred:1-m.pred;
+    tr.innerHTML=`<td class="muted">${m.date}</td>
+      <td><b class="lnk" data-team="${ea(m.blue)}">${esc(m.blue)}</b> <span class="muted">vs</span> <span class="lnk" data-team="${ea(m.red)}">${esc(m.red)}</span></td>
+      <td><span class="lnk" data-team="${ea(fav)}">${esc(fav)}</span> <span class="chip fav">${pct(fp)}</span></td>
+      <td>${m.blue_win?'<b>'+esc(m.blue)+'</b>':'<b>'+esc(m.red)+'</b>'}</td>
+      <td class="${ok?'ok':'no'}">${ok?'✓':'✗'}</td>`;return tr});
+  p.append(tableEl([['Date'],[t('Match','Match')],[t('Pick du modèle','Model pick')],[t('Vainqueur','Winner')],[t('Réussi','Hit')]],rows));return p;
+}
+function teams(){
+  const regs=['ALL',...state.regions.map(r=>r.region)];
+  const bar=filterBar(regs.map(l=>[l,l==='ALL'?t('Toutes','All'):l]),state.tLeague,k=>{state.tLeague=k;render()});
+  const wrap=el('div');
+  if(state.regions.length){const rb=el('div');rb.style.cssText='display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-bottom:12px;align-items:center';
+    rb.append(el('span','muted',t('Force des ligues (décalage appris sur les matchs inter-ligues) :','League strength (offset learned from inter-league games):')));
+    state.regions.forEach(r=>{const c=el('span','chip');c.style.cssText='background:var(--sunk);border:1px solid var(--line2);color:var(--ink);padding:4px 9px';
+      c.innerHTML=`<b>${r.region}</b> <span class="elo">${r.rating}</span>`;rb.append(c)});wrap.append(rb)}
+  const p=panel(t('Classement — Elo calibré par ligue (ligues majeures actives uniquement)','Ranking — league-calibrated Elo (active major leagues only)'),bar);
+  const list=state.teams.filter(x=>state.tLeague==='ALL'||x.region===state.tLeague);
+  const rows=list.map((x,i)=>{const tr=el('tr');
+    tr.innerHTML=`<td class="rk">${i+1}</td><td><b class="lnk" data-team="${ea(x.team)}">${esc(x.team)}</b><span class="tag">${esc(x.league)}</span></td>
+      <td class="elo num">${x.power}</td><td class="num muted">${x.lg_off>=0?'+':''}${x.lg_off}</td><td class="num muted">${x.dev>=0?'+':''}${x.dev}</td>
+      <td class="num">${x.ts_mu!=null?x.ts_mu:'–'}</td><td class="num">${x.form}</td><td class="num">${x.wins}-${x.losses}</td><td class="num">${pct(x.wr)}</td>`;return tr});
+  p.append(tableEl([['#','rk'],[t('Équipe','Team')],['Power','num'],[t('Ligue','League'),'num'],[t('Écart équipe','Team dev'),'num'],['Roster TS','num'],['L10','num'],[t('Bilan','Record'),'num'],['Win%','num']],rows));
+  p.append(el('div','note',t('Power = niveau de la ligue + écart de l\'équipe dans sa ligue. Une équipe de division inférieure ne peut plus passer devant une équipe de ligue majeure : seules les ligues majeures actives sont classées.','Power = league level + team deviation inside the league. A lower-division team can no longer outrank a major-league team: only active major leagues are ranked.')));
+  wrap.append(p);return wrap;
+}
+function players(){
+  const roles=ROLES.map(r=>[r,RN[r]]);
+  const bar=filterBar(roles,state.pRole,k=>{state.pRole=k;render()});
+  const p=panel(t('Joueurs — performance individuelle + contexte d\'équipe','Players — individual performance + team context'),bar);
+  const list=state.players.filter(x=>x.role===state.pRole).slice(0,60);
+  const rows=list.map((x,i)=>{const tr=el('tr');
+    tr.innerHTML=`<td class="rk">${i+1}</td><td><b class="lnk" data-player="${ea(x.player)}" data-role="${x.role}">${esc(x.player)}</b> <span class="muted lnk" data-team="${ea(x.team)}">${esc(x.team)}</span><span class="tag">${esc(x.league)}</span></td>
+      <td class="rtg num">${x.rating.toFixed(1)}</td><td class="num muted">${x.team_pw}</td><td class="num">${pct(x.wr)}</td>
+      <td class="num">${pct(x.kp)}</td><td class="num">${x.kda}</td>`;return tr});
+  p.append(tableEl([['#','rk'],[t('Joueur','Player')],['Rating','num'],[t('Équipe','Team'),'num'],['Win%','num'],['KP','num'],['KDA','num']],rows));return p;
+}
+function champs(){
+  const wrap=el('div');
+  const W=state.worlds;
+  const srcs=[['worlds','Worlds 2026'],['recent',t('60 derniers jours','Last 60 days')],['hidden',t('💎 Valeur cachée','💎 Hidden value')],['syn',t('Synergies & counters','Synergies & counters')],['rating',t('Notes par rôle','Role ratings')]];
+  const bar=filterBar(srcs,state.cSrc,k=>{state.cSrc=k;render()});
+  if(state.cSrc==='syn'){
+    const b2=filterBar(srcs,state.cSrc,k=>{state.cSrc=k;render()});
+    const p=panel(t('Synergies & counters (modèle de draft v2, ridge)','Synergies & counters (draft model v2, ridge)'),b2);
+    const dv=state.dv;if(!dv){p.append(el('div','note','…'));wrap.append(p);return wrap}
+    const names=[...new Set(Object.keys(dv.c).map(k=>k.split('|')[1]))].sort((a,b)=>a.localeCompare(b));
+    const cur=state.synChamp&&names.includes(state.synChamp)?state.synChamp:'Ashe';state.synChamp=cur;
+    const sel=el('select');names.forEach(n=>sel.append(new Option(n,n)));sel.value=cur;sel.onchange=()=>{state.synChamp=sel.value;render()};
+    const bar=el('div');bar.style.cssText='padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap';bar.append(el('span','muted',t('Champion :','Champion:')),sel,Object.assign(el('span'),{innerHTML:LP.champ(cur,{lg:1})}));p.append(bar);
+    const sg=v=>(1/(1+Math.exp(-v))-.5)*100,fmt=v=>(v>=0?'+':'')+sg(v).toFixed(1);
+    const syn=[],cnt=[];
+    for(const k in dv.s){const [r1,r2,a,b]=k.split('|');if(a===cur)syn.push({role:r2,partner:b,rs:r1,v:dv.s[k]});else if(b===cur)syn.push({role:r1,partner:a,rs:r2,v:dv.s[k]})}
+    for(const k in dv.m){const [r,lo,hi]=k.split('|');if(lo===cur)cnt.push({role:r,opp:hi,v:dv.m[k]});else if(hi===cur)cnt.push({role:r,opp:lo,v:-dv.m[k]})}
+    const rowS=x=>`<td>${LP.champ(x.partner)}</td><td><span class="tag">${(x.role||'').toUpperCase()}</span></td><td class="num ${x.v>=0?'ok':'no'}"><b>${fmt(x.v)}</b></td>`;
+    const rowC=x=>`<td>${LP.champ(x.opp)}</td><td><span class="tag">${x.role.toUpperCase()}</span></td><td class="num ${x.v>=0?'ok':'no'}"><b>${fmt(x.v)}</b></td>`;
+    const mk=(title,hd,rows,fn)=>{const d=el('div');d.append(el('div','sec',title));const tb=tableEl(hd,rows.map(x=>{const tr=el('tr');tr.innerHTML=fn(x);return tr}));d.append(tb);return d};
+    const g2=el('div','two');g2.style.padding='4px 16px 12px';
+    const bestS=syn.slice().sort((a,b)=>b.v-a.v),bestC=cnt.slice().sort((a,b)=>b.v-a.v);
+    g2.append(mk(t('Meilleures synergies','Best synergies'),[[t('Partenaire','Partner')],[t('Rôle','Role')],[t('Effet (pts)','Effect (pts)'),'num']],bestS.slice(0,8),rowS),
+      mk(t('Pires synergies','Worst synergies'),[[t('Partenaire','Partner')],[t('Rôle','Role')],[t('Effet (pts)','Effect (pts)'),'num']],bestS.slice(-8).reverse(),rowS),
+      mk(t('Counters : ce champion bat bien…','Counters: this champion beats…'),[[t('Adversaire (même rôle)','Opponent (same role)')],[t('Rôle','Role')],[t('Effet pour lui (pts)','Effect for it (pts)'),'num']],bestC.slice(0,8),rowC),
+      mk(t('…et est battu par','…and is beaten by'),[[t('Adversaire (même rôle)','Opponent (same role)')],[t('Rôle','Role')],[t('Effet pour lui (pts)','Effect for it (pts)'),'num']],bestC.slice(-8).reverse(),rowC));
+    p.append(g2);
+    if(!syn.length&&!cnt.length)p.append(el('div','note',t('Aucun effet notable estimé pour ce champion (trop rare ou effets écrasés par le ridge).','No notable estimated effect for this champion (too rare or shrunk by the ridge).')));
+    p.append(el('div','note',t('Effets en points de win% (à force d\'équipe égale), estimés par ridge sur les games récentes (demi-vie 240 j) ; seuls les effets significatifs du modèle sont conservés. Informatif : en test hors échantillon, les synergies et les counters n\'ajoutent rien au-delà de la valeur propre du champion (log-loss −0,0014 avec les champions seuls, −0,0015 avec counters, −0,0011 avec synergies : écarts non significatifs entre eux).','Effects in win% points (at equal team strength), estimated by ridge on recent games (240-day half-life); only the model\'s non-negligible effects are kept. Informational: out-of-sample, synergies and counters add nothing beyond the champion\'s own value (log-loss −0.0014 champions only, −0.0015 with counters, −0.0011 with synergies: differences not significant).')));
+    wrap.append(p);return wrap;
+  }
+  if(state.cSrc==='hidden'){
+    const roles=[['ALL',t('Tous','All')],...ROLES.map(r=>[r,RN[r]])];
+    const b2=filterBar([...srcs.map(x=>x),],state.cSrc,k=>{state.cSrc=k;render()});
+    const b3=el('div');b3.style.cssText='display:flex;gap:10px;flex-wrap:wrap';b3.append(b2,filterBar(roles,state.cRole,k=>{state.cRole=k;render()}));
+    const p=panel(t('Valeur cachée — effet réel du champion vs ce que montre le winrate','Hidden value — a champion\'s real effect vs what the winrate shows'),b3);
+    const pres={};((W&&W.meta_recent&&W.meta_recent.rows)||[]).forEach(r=>pres[r.champion]=r.pres);
+    const list=state.champions.filter(x=>x.adj!=null&&x.games>=25&&(state.cRole==='ALL'||x.role===state.cRole)).slice().sort((a,b)=>b.hv-a.hv);
+    p.append(tableEl([['#','rk'],['Champion'],[t('Rôle','Role')],[t('Effet ajusté (pts)','Adjusted effect (pts)'),'num'],[t('Winrate brut (pts)','Raw winrate (pts)'),'num'],[t('Écart caché (pts)','Hidden gap (pts)'),'num'],
+      [t('Gain après 15 games (pts)','Gain after 15 games (pts)'),'num'],[t('Présence 60 j','Presence 60 d'),'num'],['Games','num'],[t('Verdict','Verdict')]],
+      list.map((x,i)=>{const tr=el('tr'),pr=pres[x.champion];
+        const v=x.hv>=2&&(pr==null||pr<.25)?`<span class="pill" style="color:var(--fav);border-color:var(--fav)">💎 ${t('sous-estimé','undervalued')}</span>`:x.hv<=-2&&pr!=null&&pr>=.25?`<span class="pill" style="color:var(--warn);border-color:var(--warn)">${t('surcoté','overrated')}</span>`:'–';
+        tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(x.champion)}</td><td><span class="tag">${x.role.toUpperCase()}</span></td>
+          <td class="num"><b>${x.adj_pts>=0?'+':''}${x.adj_pts.toFixed(1)}</b></td><td class="num muted">${x.raw_pts>=0?'+':''}${x.raw_pts.toFixed(1)}</td>
+          <td class="num ${x.hv>=0?'ok':'no'}"><b>${x.hv>=0?'+':''}${x.hv.toFixed(1)}</b></td><td class="num">${x.learn15!=null?(x.learn15>=0?'+':'')+x.learn15.toFixed(1):'–'}</td>
+          <td class="num muted">${pr!=null?pct(pr):'–'}</td><td class="num">${x.games}</td><td>${v}</td>`;return tr})));
+    p.append(el('div','note',t('Effet ajusté = effet net du champion (en points de win%, à la maîtrise typique du champion) estimé par régression ridge de type RAPM : on contrôle simultanément la force d\'équipe, le niveau des 10 joueurs et la maîtrise du champion par son joueur (nombre de games déjà jouées). Écart caché = effet ajusté − winrate brut shrinké : positif = le winrate sous-estime le champion (souvent un champion difficile à maîtriser ou joué par des équipes plus faibles). « Gain après 15 games » = courbe d\'apprentissage. Échantillons modestes : à lire comme des pistes (ridge, ≥ 25 games, tier-1 depuis 2025). Testé en walk-forward : estimation de la valeur de draft meilleure que l\'ancien modèle (log-loss 0,6276 vs 0,6306 à force d\'équipe égale).','Adjusted effect = the champion\'s net effect (in win% points, at the typical mastery of the champion) from a RAPM-style ridge regression controlling for team strength, the level of all 10 players and the champion\'s mastery by its player (games already played). Hidden gap = adjusted effect − shrunk raw winrate: positive = the winrate understates the champion (often hard to master or played by weaker teams). “Gain after 15 games” = learning curve. Modest samples: read as leads (ridge, ≥ 25 games, tier-1 since 2025). Walk-forward tested: better draft-value estimate than the old model (log-loss 0.6276 vs 0.6306 at equal team strength).')));
+    wrap.append(p);return wrap;
+  }
+  if(state.cSrc==='rating'){
+    const roles=[['ALL',t('Tous','All')],...ROLES.map(r=>[r,RN[r]])];
+    const b2=filterBar(roles,state.cRole,k=>{state.cRole=k;render()});
+    const p=panel(t('Valeur de draft ajustée par rôle (modèle v2) + TrueSkill','Adjusted draft value by role (model v2) + TrueSkill'),b2);
+    const list=state.champions.filter(x=>state.cRole==='ALL'||x.role===state.cRole).slice(0,60);
+    p.append(tableEl([['#','rk'],['Champion'],[t('Rôle','Role')],[t('Valeur ajustée (RAPM)','Adjusted value (RAPM)'),'num'],['TrueSkill','num'],['Win%','num'],['Games','num'],['GD@15','num']],
+      list.map((x,i)=>{const tr=el('tr'),vv=x.adj!=null?x.adj:x.dv;tr.innerHTML=`<td class="rk">${i+1}</td><td>${LP.champ(x.champion)}</td><td><span class="tag">${x.role.toUpperCase()}</span></td>
+        <td class="rtg num">${vv>=0?'+':''}${vv.toFixed(2)}</td><td class="num">${x.ts.toFixed(1)}</td><td class="num">${pct(x.wr)}</td><td class="num">${x.games}</td><td class="num">${x.gd15>0?'+':''}${x.gd15}</td>`;return tr})));
+    p.append(el('div','note',t('Valeur de draft = effet du champion dans ce rôle sur la probabilité de victoire (logit), à force d\'équipe égale, estimé avec décroissance temporelle (la meta change vite).','Draft value = the champion\'s effect in that role on win probability (logit), holding team strength equal, estimated with time decay (the meta moves fast).')));
+    wrap.append(p);return wrap;
+  }
+  if(!W){wrap.append(el('div','err','–'));return wrap}
+  const M=state.cSrc==='worlds'?W.meta_worlds:W.meta_recent;
+  const p=panel(`${t('Meta','Meta')} — ${M.since} (${M.n} games)`,bar);
+  p.append(champTable(M.rows.slice(0,60)));
+  p.append(el('div','note',t(`Présence = % des games où le champion est pick ou ban. « Prévu » = probabilité moyenne que le modèle lui donne d'apparaître dans un game des ${M.pred_matches||0} prochains matchs connus.`,`Presence = % of games where the champion is picked or banned. “Forecast” = the model's average probability that it appears in a game of the ${M.pred_matches||0} next known matches.`)));
+  wrap.append(p);return wrap;
+}
+function predict(){
+  const p=panel(t('Simuler un match — force d\'équipe × joueurs × forme × draft','Predict a matchup — team × players × form × draft'));
+  const teamsL=[...state.teams].sort((a,b)=>a.team.localeCompare(b.team));
+  const TM=state.tidx,BL=(state.meta.blend||{}),PRE=BL.pre,POST=BL.post||PRE;
+  const sig=z=>1/(1+Math.exp(-z));
+  const pool=(state.pool&&state.pool.length?state.pool:[]).map(c=>c.champion).sort((a,b)=>a.localeCompare(b));
+  const wrap=el('div');wrap.style.padding='16px';
+  const selA=el('select'),selB=el('select'),selBo=el('select');selBo.style.minWidth='90px';
+  teamsL.forEach(x=>{selA.append(new Option(`${x.team} (${x.power})`,x.team));selB.append(new Option(`${x.team} (${x.power})`,x.team))});
+  const dflt=(n,fb)=>{const i=teamsL.findIndex(x=>x.team===n);return i>=0?i:fb};
+  selA.selectedIndex=dflt('Gen.G',0);selB.selectedIndex=dflt('T1',1);
+  [1,3,5].forEach(n=>selBo.append(new Option('Bo'+n,n)));selBo.value=3;
+  const row=el('div');row.style.cssText='display:flex;gap:12px;flex-wrap:wrap;align-items:center';
+  row.append(selA,el('span','muted','vs'),selB,selBo);
+  const out=el('div');
+  const draftToggle=el('button','filt',t('＋ Ajouter les drafts (optionnel)','＋ Add drafts (optional)'));draftToggle.style.marginTop='12px';
+  const draftBox=el('div');draftBox.style.cssText='display:none;margin-top:12px';
+  const picks={blue:{},red:{}};
+  const champSel=(side,role)=>{const s=el('select');s.style.minWidth='140px';s.append(new Option('— '+RN[role]+' —',''));
+    pool.forEach(c=>s.append(new Option(c,c)));s.onchange=()=>{picks[side][role]=s.value;go()};return s};
+  const grid=el('div');grid.style.cssText='display:flex;flex-wrap:wrap;gap:18px';
+  ['blue','red'].forEach(side=>{const col=el('div');col.append(el('div','sec',side==='blue'?t('Draft de A (côté bleu)','A draft (blue side)'):t('Draft de B (côté rouge)','B draft (red side)')));
+    col.style.cssText='flex:1 1 240px';ROLES.forEach(role=>{const r=el('div');r.style.margin='6px 0';r.append(champSel(side,role));col.append(r)});grid.append(col)});
+  draftBox.append(grid);
+  draftToggle.onclick=()=>{draftBox.style.display=draftBox.style.display==='none'?'block':'none'};
+  const SYN=[['top','jng'],['jng','mid'],['mid','bot'],['bot','sup'],['jng','sup'],['mid','sup'],['jng','bot']];
+  function draftEdge(){const dv=state.dv;if(!dv)return null;const B=ROLES.map(r=>picks.blue[r]),R=ROLES.map(r=>picks.red[r]);
+    if(B.filter(Boolean).length<5||R.filter(Boolean).length<5)return null;let e=0;
+    ROLES.forEach((r,i)=>{const a=B[i],b=R[i];e+=dv.c[r+'|'+a]||0;e-=dv.c[r+'|'+b]||0;const lo=a<=b?a:b,hi=a<=b?b:a;e+=(a===lo?1:-1)*(dv.m[r+'|'+lo+'|'+hi]||0)});
+    SYN.forEach(([r1,r2])=>{const i=ROLES.indexOf(r1),j=ROLES.indexOf(r2);e+=dv.s[r1+'|'+r2+'|'+B[i]+'|'+B[j]]||0;e-=dv.s[r1+'|'+r2+'|'+R[i]+'|'+R[j]]||0});return e}
+  function go(){
+    const a=selA.value,b=selB.value,bo=+selBo.value,TA=TM[a],TB=TM[b];if(!TA||!TB||a===b||!PRE){out.innerHTML='';return}
+    const R={};R[a]={bt:TA.bt,pbt:TA.pbt,fw:TA.fw,ts_mu:TA.ts_mu,ts_sig:TA.ts_sig};R[b]={bt:TB.bt,pbt:TB.pbt,fw:TB.fw,ts_mu:TB.ts_mu,ts_sig:TB.ts_sig};
+    const H=(state.worlds&&state.worlds.h2h)||{};
+    const de=draftEdge();
+    let pg,note;
+    if(de!=null){pg=SIM.gameP(a,b,R,BL,H,'post',[{draft:de},{draft:-de}]);note=t('Avec draft : avantage de draft de A ','With draft: A draft edge ')+(de>=0?'+':'')+de.toFixed(2)+' logit'}
+    else{pg=SIM.gameP(a,b,R,BL,H,'pre');note=t('Aucune draft saisie : probabilité avant draft (moyenne des deux côtés).','No draft entered: pre-draft probability (average of both sides).')}
+    const ps=SIM.seriesP(pg,bo);
+    out.innerHTML=`<div class="pred">
+      <div class="side"><div class="nm">${esc(a)}</div><div class="el">Power ${TA.power} · ${TA.region}</div><div class="wpbig" style="color:var(--fav)">${pct(ps)}</div></div>
+      <div class="muted">Bo${bo}<br>${t('série','series')}</div>
+      <div class="side"><div class="nm">${esc(b)}</div><div class="el">Power ${TB.power} · ${TB.region}</div><div class="wpbig" style="color:var(--bad)">${pct(1-ps)}</div></div></div>
+      <div class="wpbar"><span style="width:${ps*100}%"></span></div>
+      <div class="muted" style="padding:2px 18px 4px">${t('Un game','Single game')} : ${pct(pg,1)} / ${pct(1-pg,1)} — ${note}</div>`;
+  }
+  selA.onchange=go;selB.onchange=go;selBo.onchange=go;wrap.append(row,draftToggle,draftBox,out);p.append(wrap);go();return p;
+}
+
+boot();
+</script>
+</body></html>
